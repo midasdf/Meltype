@@ -155,6 +155,16 @@ public static unsafe class Exports
         if (handle != IntPtr.Zero && GCHandle.FromIntPtr(handle).Target is MeltypeSession session) session.Direct = direct != 0;
     }
 
+    /// <summary>
+    /// 直前の Space が、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (1 / 0)。読むと印が消える (#1033)。
+    /// fcitx5 のアドオンは、Shift+Space を本体が切替として受け取ったかを知り、fcitx5 の切替キーとしても受け取らないようにする。
+    /// </summary>
+    [UnmanagedCallersOnly(EntryPoint = "meltype_take_space_toggled")]
+    public static int TakeSpaceToggled(IntPtr handle)
+    {
+        return handle != IntPtr.Zero && GCHandle.FromIntPtr(handle).Target is MeltypeSession session && session.TakeSpaceToggled() ? 1 : 0;
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "meltype_set_code_input")]
     public static void SetCodeInput(IntPtr handle, int enabled)
     {

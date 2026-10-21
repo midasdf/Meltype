@@ -288,6 +288,47 @@ public sealed class MeltypeSession
 
     public bool DirectEnglishWord => _directEnglishWord;
 
+    /// <summary>
+    /// 直前の Space が、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (#1033)。
+    /// fcitx5 のアドオンは、これで Shift+Space を fcitx5 の切替キーとして受け取ったかを知り、
+    /// 同じ切り替えを 2 回しないようにする。読むだけでは変わらず、<see cref="TakeSpaceToggled"/> で読むと false に戻る。
+    /// </summary>
+    public bool SpaceToggled => _spaceToggled;
+
+    /// <summary><see cref="SpaceToggled"/> を読み、印を消す。</summary>
+    public bool TakeSpaceToggled()
+    {
+        var toggled = _spaceToggled;
+        _spaceToggled = false;
+        return toggled;
+    }
+
+    private bool _spaceToggled;
+
+    /// <summary>
+    /// 押されたキーが、設定「日本語 / 英数を切り替えるキーを追加」の組み合わせか (#1033)。
+    /// IBus・fcitx5 は Ctrl と Shift を 1 つの modifier で渡す (区別できない) ときは、looseModifiers を true にして呼ぶ。
+    /// そのときは Ctrl か Shift のどちらかが押されていれば合っているとみなす。
+    /// Space だけ (修飾キーなし) の組み合わせは切替にしない (英数のときの空白・日本語のときの半角スペースが入らなくなる)。
+    /// </summary>
+    private static bool IsToggleShortcut(string text, int vk, bool ctrl, bool alt, bool shift, bool command, bool looseModifiers)
+    {
+        if (text.Length == 0) return false;
+        foreach (var shortcut in KeyShortcut.ParseList(text))
+        {
+            if (shortcut.Vk != vk || shortcut.Alt != alt || shortcut.Win != command) continue;
+            if (vk == VirtualKeys.Space && !shortcut.Ctrl && !shortcut.Shift) continue;
+            if (!looseModifiers)
+            {
+                if (shortcut.Ctrl == ctrl && shortcut.Shift == shift) return true;
+                continue;
+            }
+            var wantsModifier = shortcut.Ctrl || shortcut.Shift;
+            if (wantsModifier == (ctrl || shift)) return true;
+        }
+        return false;
+    }
+
     /// <summary>入力を覚えないように求める入力欄か (Windows のブラウザーのシークレット / InPrivate ウィンドウ)。true の間は学習しない。</summary>
     public bool Private { get; set; }
 
@@ -408,6 +449,18 @@ public sealed class MeltypeSession
         // Ctrl・Option・Command と一緒のキーは、変換ボックスが空ならアプリの操作 (コピーなど) なので触らない。
         var modifier = control || alt || command;
         var settings = _settings();
+        // 設定「日本語 / 英数を切り替えるキーを追加」(#1033)。Windows 版のフックは MeltypeEngine が読む。
+        // Mac・Linux の本体はここで読むので、Shift+Space を切替に指定でき、全角スペースを確定してしまわない。
+        // Space だけの組み合わせは切替にしない (英数のときの空白・日本語のときの半角スペースが入らなくなる)。
+        // 本体に渡ってくる control は IBus・fcitx5 では Shift を含む (どちらも 1 つの modifier) ことがある。
+        if (IsToggleShortcut(settings.ToggleKeyboardShortcuts, vk, control, alt, shift, command, looseModifiers: control && shift))
+        {
+            // 半角/全角 と同じく、変換中なら確定してから切り替える (空のときは今出ている変換ボックスを閉じる)。
+            var committed = _controller.IsComposing ? CommitPending() : new SessionResult(false, [], null);
+            Direct = !Direct;
+            if (vk == VirtualKeys.Space) _spaceToggled = true;
+            return Track(committed with { Consumed = true }, vk, ch, modifier: false);
+        }
         if (Direct && _directModeDetection && _directEnglishWord &&
             (ch is { } directChar && !char.IsAsciiLetterOrDigit(directChar) && directChar is not ('@' or '_') ||
              before is { Length: > 0 } && !char.IsAsciiLetterOrDigit(before[^1]) && before[^1] is not ('@' or '_')))

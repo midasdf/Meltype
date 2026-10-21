@@ -471,6 +471,71 @@ internal static class SessionFacadeTests
     }
 
     [Test]
+    public static void Issue1033_ShiftSpaceTogglesDirectMode()
+    {
+        // #1033: 設定「日本語 / 英数を切り替えるキーを追加」に Shift+Space があれば、本体 (Mac・Linux) も切替に使う。
+        // 全角スペースを確定せず、もう一度押すと日本語に戻る
+        var settings = new Settings { ToggleKeyboardShortcuts = "Shift+Space" };
+        var session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
+        Assert.True(!session.Direct, "最初は日本語入力");
+
+        var result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
+        Assert.True(result.Consumed, "切替の Shift+Space はアプリに渡さない");
+        Assert.Equal(0, result.Commits.Count);
+        Assert.True(session.Direct, "英数になる");
+        Assert.True(session.SpaceToggled, "fcitx5 のアドオンに、切り替えたことを伝える");
+        Assert.True(session.TakeSpaceToggled(), "印を読んで消す");
+        Assert.True(!session.TakeSpaceToggled(), "1 回だけ伝える");
+
+        result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
+        Assert.True(result.Consumed && result.Commits.Count == 0, "切替として使う");
+        Assert.True(!session.Direct, "日本語に戻る");
+        Assert.True(session.TakeSpaceToggled(), "2 回目の切替でも fcitx5 のアドオンに伝えられる");
+
+        // 設定が空 (既定) なら今までどおり全角スペース (いまは日本語に戻っている)
+        settings.ToggleKeyboardShortcuts = "";
+        result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
+        Assert.Equal("　", string.Concat(result.Commits.Select(c => c.Text)));
+        Assert.True(!session.TakeSpaceToggled(), "切替ではないので印を立てない");
+    }
+
+    [Test]
+    public static void Issue1033_OtherShortcutsAndGuards()
+    {
+        var settings = new Settings { ToggleKeyboardShortcuts = "Ctrl+Space" };
+        var session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
+        var result = session.HandleKey(VirtualKeys.Space, ' ', false, true, false, false, "");
+        Assert.True(result.Consumed && session.Direct, "Ctrl+Space で英数になる");
+        Assert.True(session.TakeSpaceToggled(), "Space の切替は印を立てる (fcitx5 に伝える)");
+
+        // Shift+Space は Ctrl+Space の設定では切替にならない (日本語に戻して、今までどおり全角スペースになること)
+        session.Direct = false;
+        var shiftSpace = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
+        Assert.Equal("　", string.Concat(shiftSpace.Commits.Select(c => c.Text)));
+
+        // Space だけの組み合わせは切替にしない (英数の空白・日本語のときの半角スペースが入らなくなるため)。
+        // Ctrl+Space も設定していれば、Ctrl+Space は切替のまま
+        settings.ToggleKeyboardShortcuts = "Space; Ctrl+Space";
+        result = session.HandleKey(VirtualKeys.Space, ' ', false, false, false, false, "");
+        Assert.True(!result.Consumed, "Space だけならアプリに通す");
+        Assert.True(!session.Direct, "Space だけでは切り替えない");
+        result = session.HandleKey(VirtualKeys.Space, ' ', false, true, false, false, "");
+        Assert.True(result.Consumed && session.Direct, "Ctrl+Space は設定どおり切替になる");
+        Assert.True(session.TakeSpaceToggled(), "Space の切替も伝える");
+        session.Direct = false;
+
+        // 打っている途中に切替を押したら、打った内容 (かな) を確定してから切り替える
+        session.TakeSpaceToggled();
+        settings.ToggleKeyboardShortcuts = "Shift+Space";
+        session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
+        Type(session, "kyou");
+        result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
+        Assert.True(result.Consumed, "切替として使う");
+        Assert.Equal("きょう", string.Concat(result.Commits.Select(c => c.Text)), "打っていた内容を確定する (変換は Space なので、かなのまま)");
+        Assert.True(session.Direct, "確定してから英数になる");
+    }
+
+    [Test]
     public static void RoleKeys_OnlyWhenSettingIsOnAndComposing()
     {
         // #199: Linux の IBus・fcitx5 は、入力中の 変換・無変換・ひらがな/カタカナ を先に本体に渡す (meltype_role_key)。
