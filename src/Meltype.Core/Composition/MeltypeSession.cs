@@ -289,42 +289,35 @@ public sealed class MeltypeSession
     public bool DirectEnglishWord => _directEnglishWord;
 
     /// <summary>
-    /// 直前の Space が、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (#1033)。
-    /// fcitx5 のアドオンは、これで Shift+Space を fcitx5 の切替キーとして受け取ったかを知り、
-    /// 同じ切り替えを 2 回しないようにする。読むだけでは変わらず、<see cref="TakeSpaceToggled"/> で読むと false に戻る。
+    /// 直前のキーが、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (#1033)。
+    /// Mac・Linux のフロントエンドは、これを見て自分のモード (A / あ、入力メニュー) を本体に合わせる。
+    /// 読むだけでは変わらず、<see cref="TakeToggled"/> で読むと false に戻る。
     /// </summary>
-    public bool SpaceToggled => _spaceToggled;
+    public bool Toggled => _toggled;
 
-    /// <summary><see cref="SpaceToggled"/> を読み、印を消す。</summary>
-    public bool TakeSpaceToggled()
+    /// <summary><see cref="Toggled"/> を読み、印を消す。</summary>
+    public bool TakeToggled()
     {
-        var toggled = _spaceToggled;
-        _spaceToggled = false;
+        var toggled = _toggled;
+        _toggled = false;
         return toggled;
     }
 
-    private bool _spaceToggled;
+    private bool _toggled;
 
     /// <summary>
     /// 押されたキーが、設定「日本語 / 英数を切り替えるキーを追加」の組み合わせか (#1033)。
-    /// IBus・fcitx5 は Ctrl と Shift を 1 つの modifier で渡す (区別できない) ときは、looseModifiers を true にして呼ぶ。
-    /// そのときは Ctrl か Shift のどちらかが押されていれば合っているとみなす。
+    /// 修飾キーは、どのフロントエンドも Ctrl と Shift を別々のビットで渡す (macOS・fcitx5・IBus とも)。
     /// Space だけ (修飾キーなし) の組み合わせは切替にしない (英数のときの空白・日本語のときの半角スペースが入らなくなる)。
     /// </summary>
-    private static bool IsToggleShortcut(string text, int vk, bool ctrl, bool alt, bool shift, bool command, bool looseModifiers)
+    private static bool IsToggleShortcut(string text, int vk, bool ctrl, bool alt, bool shift, bool command)
     {
         if (text.Length == 0) return false;
         foreach (var shortcut in KeyShortcut.ParseList(text))
         {
             if (shortcut.Vk != vk || shortcut.Alt != alt || shortcut.Win != command) continue;
             if (vk == VirtualKeys.Space && !shortcut.Ctrl && !shortcut.Shift) continue;
-            if (!looseModifiers)
-            {
-                if (shortcut.Ctrl == ctrl && shortcut.Shift == shift) return true;
-                continue;
-            }
-            var wantsModifier = shortcut.Ctrl || shortcut.Shift;
-            if (wantsModifier == (ctrl || shift)) return true;
+            if (shortcut.Ctrl == ctrl && shortcut.Shift == shift) return true;
         }
         return false;
     }
@@ -428,8 +421,11 @@ public sealed class MeltypeSession
 
     /// <summary>
     /// キーを 1 つ処理する。before / after は入力欄のキャレットの前後の文字列 (分かれば。英語とも日本語とも読める語の判定と変換の文脈に使う)。
+    /// toggleShortcuts は、設定「日本語 / 英数を切り替えるキーを追加」をこの経路で読むか。
+    /// Meltype IME (Windows の TSF) は DLL が打鍵ごとに direct を送ってくるので、そちらからは false にして読ませない (#1033)。
     /// </summary>
-    public SessionResult HandleKey(int vk, char? ch, bool shift, bool control, bool alt, bool command, string? before = null, string? after = null)
+    public SessionResult HandleKey(int vk, char? ch, bool shift, bool control, bool alt, bool command, string? before = null, string? after = null,
+        bool toggleShortcuts = true)
     {
         if (CodeInput && !_controller.IsComposing) before = SyncCodeLine(before);
         // 文字列を閉じる引用符は英数のままアプリに通す (打っている途中の日本語は確定する。空の文字列 "" を閉じるときも)
@@ -451,14 +447,13 @@ public sealed class MeltypeSession
         var settings = _settings();
         // 設定「日本語 / 英数を切り替えるキーを追加」(#1033)。Windows 版のフックは MeltypeEngine が読む。
         // Mac・Linux の本体はここで読むので、Shift+Space を切替に指定でき、全角スペースを確定してしまわない。
-        // Space だけの組み合わせは切替にしない (英数のときの空白・日本語のときの半角スペースが入らなくなる)。
-        // 本体に渡ってくる control は IBus・fcitx5 では Shift を含む (どちらも 1 つの modifier) ことがある。
-        if (IsToggleShortcut(settings.ToggleKeyboardShortcuts, vk, control, alt, shift, command, looseModifiers: control && shift))
+        // Meltype IME (Windows の TSF) は DLL が打鍵ごとに direct を送ってくるので、toggleShortcuts を false にして読ませない。
+        if (toggleShortcuts && IsToggleShortcut(settings.ToggleKeyboardShortcuts, vk, control, alt, shift, command))
         {
             // 半角/全角 と同じく、変換中なら確定してから切り替える (空のときは今出ている変換ボックスを閉じる)。
             var committed = _controller.IsComposing ? CommitPending() : new SessionResult(false, [], null);
             Direct = !Direct;
-            if (vk == VirtualKeys.Space) _spaceToggled = true;
+            _toggled = true;
             return Track(committed with { Consumed = true }, vk, ch, modifier: false);
         }
         if (Direct && _directModeDetection && _directEnglishWord &&

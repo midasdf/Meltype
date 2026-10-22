@@ -156,13 +156,20 @@ public static unsafe class Exports
     }
 
     /// <summary>
-    /// 直前の Space が、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (1 / 0)。読むと印が消える (#1033)。
-    /// fcitx5 のアドオンは、Shift+Space を本体が切替として受け取ったかを知り、fcitx5 の切替キーとしても受け取らないようにする。
+    /// 直前のキーが、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (1 / 0)。読むと印が消える (#1033)。
+    /// Mac・Linux のフロントエンドは、これと <c>meltype_is_direct</c> で、自分のモード (A / あ、入力メニュー) を本体に合わせる。
     /// </summary>
-    [UnmanagedCallersOnly(EntryPoint = "meltype_take_space_toggled")]
-    public static int TakeSpaceToggled(IntPtr handle)
+    [UnmanagedCallersOnly(EntryPoint = "meltype_take_mode_toggled")]
+    public static int TakeToggled(IntPtr handle)
     {
-        return handle != IntPtr.Zero && GCHandle.FromIntPtr(handle).Target is MeltypeSession session && session.TakeSpaceToggled() ? 1 : 0;
+        return handle != IntPtr.Zero && GCHandle.FromIntPtr(handle).Target is MeltypeSession session && session.TakeToggled() ? 1 : 0;
+    }
+
+    /// <summary>本体のモード (1 = 英数 / 直接入力、0 = 日本語)。切り替えたあとにフロントエンドが読む (#1033)。</summary>
+    [UnmanagedCallersOnly(EntryPoint = "meltype_is_direct")]
+    public static int IsDirect(IntPtr handle)
+    {
+        return handle != IntPtr.Zero && GCHandle.FromIntPtr(handle).Target is MeltypeSession session && session.Direct ? 1 : 0;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "meltype_set_code_input")]

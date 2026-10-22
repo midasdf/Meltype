@@ -300,7 +300,7 @@ public sealed class Settings
     public bool ShowCandidatesWhileTyping { get; set; }
 
     [Category("1. 全般"), DisplayName("日本語 / 英数を切り替えるキーを追加"),
-     Description("日本語 / 英数 (直接入力) の切り替えに使うキーの組み合わせを、半角/全角 のほかに追加します。「Ctrl+Space; Alt+Backquote」のように ; で区切って書きます。修飾キーは Ctrl・Alt・Shift・Win、キー名は A〜Z・0〜9・F1〜F12・Space・Tab・Enter・Esc・Backquote・Muhenkan・Henkan・Kanji。Meltype キーボード (Windows) と、Mac 版・Linux 版 (fcitx5・IBus) で使えます。Shift+Space を入れると、日本語入力のときの Shift+Space は全角スペースではなく切り替えになります (Linux の fcitx5 では、fcitx5 の切替キーにも Shift+Space を入れてください)。")]
+     Description("日本語 / 英数 (直接入力) の切り替えに使うキーの組み合わせを、半角/全角 のほかに追加します。「Ctrl+Space; Alt+Backquote」のように ; で区切って書きます。修飾キーは Ctrl・Alt・Shift・Win、キー名は A〜Z・0〜9・F1〜F12・Space・Tab・Enter・Esc・Backquote・Muhenkan・Henkan・Kanji。Meltype キーボード (Windows) と、Mac 版・Linux 版 (fcitx5・IBus) で使えます (Meltype IME では使いません)。Shift+Space を入れると、日本語入力のときの Shift+Space は全角スペースではなく切り替えになります。")]
     public string ToggleKeyboardShortcuts { get; set; } = "";
 
     [Category("1. 全般"), DisplayName("#番号で GitHub の Issue・PR のタイトルを候補に出す"),

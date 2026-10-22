@@ -49,7 +49,8 @@ struct Native {
     char *(*commit)(void *) = nullptr;
     char *(*selectCandidate)(void *, int) = nullptr;
     void (*setDirect)(void *, int) = nullptr;
-    int (*takeSpaceToggled)(void *) = nullptr; // 古い本体には無い (#1033: Shift+Space を本体が切替に使ったか)
+    int (*takeModeToggled)(void *) = nullptr; // 古い本体には無い (#1033: 本体が切替キーで切り替えたか)
+    int (*isDirect)(void *) = nullptr;        // 古い本体には無い (#1033: 本体のモード。1 = 英数)
     void (*setCanDelete)(void *, int) = nullptr; // 古い本体には無い
     void (*setCodeInput)(void *, int) = nullptr; // 古い本体には無い (コード入力: ターミナルの入力欄で既定にする、#715)
     char *(*roleKey)(void *, int) = nullptr;     // 古い本体には無い (入力中のキーの役割: #199)
@@ -71,7 +72,8 @@ struct Native {
         commit = reinterpret_cast<decltype(commit)>(sym("meltype_commit"));
         selectCandidate = reinterpret_cast<decltype(selectCandidate)>(sym("meltype_select_candidate"));
         setDirect = reinterpret_cast<decltype(setDirect)>(sym("meltype_set_direct"));
-        takeSpaceToggled = reinterpret_cast<decltype(takeSpaceToggled)>(sym("meltype_take_space_toggled"));
+        takeModeToggled = reinterpret_cast<decltype(takeModeToggled)>(sym("meltype_take_mode_toggled"));
+        isDirect = reinterpret_cast<decltype(isDirect)>(sym("meltype_is_direct"));
         setCanDelete = reinterpret_cast<decltype(setCanDelete)>(sym("meltype_set_can_delete"));
         setCodeInput = reinterpret_cast<decltype(setCodeInput)>(sym("meltype_set_code_input"));
         roleKey = reinterpret_cast<decltype(roleKey)>(sym("meltype_role_key"));
@@ -339,7 +341,8 @@ public:
     }
     void *session() const { return session_; }
     bool direct = false;
-    // Shift を押しているか (fcitx5 は Space のキーに Shift を付けて渡さないので、キーから覚えておく: #1033)
+    // Shift を押しているか。fcitx5 は Space のキーに Shift を付けて渡さないことがある (どの環境で起きるかは
+    // 未確認。手元は KDE Plasma 6 / Wayland、X11 と GNOME は試していない) ので、キーから覚えておく: #1033
     bool shiftHeld = false;
     // 変換ボックス (preedit) を出しているか。出している間は、周りの文字 (preedit を含む) を本体に渡さない
     bool preeditVisible = false;
@@ -428,9 +431,10 @@ public:
         Json result;
         if (!JsonReader(text).read(result)) return;
         apply(ic, result);
-        // 本体が Space の切替をしたときは、fcitx5 のモード表示 (A / あ) も本体に合わせる (#1033)
-        if (vk == 0x20 && native_.takeSpaceToggled && native_.takeSpaceToggled(state->session())) {
-            state->direct = !state->direct;
+        // 本体が設定「日本語 / 英数を切り替えるキーを追加」の切替をしたときは、fcitx5 のモード (A / あ) も
+        // 本体に合わせる (#1033)。合わせないと、次に 半角/全角 を押したときの切り替え先がずれる。
+        if (native_.takeModeToggled && native_.takeModeToggled(state->session())) {
+            state->direct = native_.isDirect ? native_.isDirect(state->session()) != 0 : !state->direct;
             showMode(ic, state->direct);
         }
         if (result.flag("consumed")) event.filterAndAccept();
@@ -440,8 +444,15 @@ public:
     }
 
     // 別の入力欄・アプリに移るとき、入力欄が変わったときは、未確定の内容をそのまま確定する。
-    void reset(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override { commitPending(event.inputContext()); }
-    void deactivate(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override { commitPending(event.inputContext()); }
+    // フォーカスが外れると Shift の離しが届かないことがあるので、押し下げの記憶も戻す (#1033)。
+    void reset(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override {
+        event.inputContext()->propertyFor(&factory_)->shiftHeld = false;
+        commitPending(event.inputContext());
+    }
+    void deactivate(const fcitx::InputMethodEntry &, fcitx::InputContextEvent &event) override {
+        event.inputContext()->propertyFor(&factory_)->shiftHeld = false;
+        commitPending(event.inputContext());
+    }
 
     void selectCandidate(fcitx::InputContext *ic, int index) {
         auto *state = ic->propertyFor(&factory_);
