@@ -156,7 +156,7 @@ public static unsafe class Exports
     }
 
     /// <summary>
-    /// 直前のキーが、設定「日本語 / 英数を切り替えるキーを追加」の切替として使われたか (1 / 0)。読むと印が消える (#1033)。
+    /// 直前のキーが、設定「入力モード切り替えキー」の切替として使われたか (1 / 0)。読むと印が消える (#1033)。
     /// Mac・Linux のフロントエンドは、これと <c>meltype_is_direct</c> で、自分のモード (A / あ、入力メニュー) を本体に合わせる。
     /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "meltype_take_mode_toggled")]

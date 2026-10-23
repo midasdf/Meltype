@@ -473,9 +473,12 @@ internal static class SessionFacadeTests
     [Test]
     public static void Issue1033_ShiftSpaceTogglesDirectMode()
     {
-        // #1033: 設定「日本語 / 英数を切り替えるキーを追加」に Shift+Space があれば、本体 (Mac・Linux) も切替に使う。
+        // #1033: 設定「入力モード切り替えキー」に Shift+Space があれば、本体 (Mac・Linux) も切替に使う。
         // 全角スペースを確定せず、もう一度押すと日本語に戻る
-        var settings = new Settings { ToggleKeyboardShortcuts = "Shift+Space" };
+        var settings = new Settings
+        {
+            ToggleShortcuts = [new ToggleShortcut { Key = VirtualKeys.Space, Modifiers = ShortcutModifiers.Shift }],
+        };
         var session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
         Assert.True(!session.Direct, "最初は日本語入力");
 
@@ -492,8 +495,8 @@ internal static class SessionFacadeTests
         Assert.True(!session.Direct, "日本語に戻る");
         Assert.True(session.TakeToggled(), "2 回目の切替でも伝えられる");
 
-        // 設定が空 (既定) なら今までどおり全角スペース (いまは日本語に戻っている)
-        settings.ToggleKeyboardShortcuts = "";
+        // 登録が無ければ今までどおり全角スペース (いまは日本語に戻っている)
+        settings.ToggleShortcuts = [];
         result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
         Assert.Equal("　", string.Concat(result.Commits.Select(c => c.Text)));
         Assert.True(!session.TakeToggled(), "切替ではないので印を立てない");
@@ -502,7 +505,10 @@ internal static class SessionFacadeTests
     [Test]
     public static void Issue1033_OtherShortcutsAndGuards()
     {
-        var settings = new Settings { ToggleKeyboardShortcuts = "Ctrl+Space" };
+        var settings = new Settings
+        {
+            ToggleShortcuts = [new ToggleShortcut { Key = VirtualKeys.Space, Modifiers = ShortcutModifiers.Control }],
+        };
         var session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
         var result = session.HandleKey(VirtualKeys.Space, ' ', false, true, false, false, "");
         Assert.True(result.Consumed && session.Direct, "Ctrl+Space で英数になる");
@@ -513,20 +519,12 @@ internal static class SessionFacadeTests
         var shiftSpace = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
         Assert.Equal("　", string.Concat(shiftSpace.Commits.Select(c => c.Text)));
 
-        // Space だけの組み合わせは切替にしない (英数の空白・日本語のときの半角スペースが入らなくなるため)。
-        // Ctrl+Space も設定していれば、Ctrl+Space は切替のまま
-        settings.ToggleKeyboardShortcuts = "Space; Ctrl+Space";
-        result = session.HandleKey(VirtualKeys.Space, ' ', false, false, false, false, "");
-        Assert.True(!result.Consumed, "Space だけならアプリに通す");
-        Assert.True(!session.Direct, "Space だけでは切り替えない");
-        result = session.HandleKey(VirtualKeys.Space, ' ', false, true, false, false, "");
-        Assert.True(result.Consumed && session.Direct, "Ctrl+Space は設定どおり切替になる");
-        Assert.True(session.TakeToggled(), "Space の切替も伝える");
-        session.Direct = false;
+        // Space だけの組み合わせは、設定の読み込みで ToggleShortcutValidator が外す
+        // (ToggleShortcutTests.Shortcut_ShiftSpaceIsAllowedAndConflictsWithTheHalfWidthSetting)。
 
         // 打っている途中に切替を押したら、打った内容 (かな) を確定してから切り替える
         session.TakeToggled();
-        settings.ToggleKeyboardShortcuts = "Shift+Space";
+        settings.ToggleShortcuts = [new ToggleShortcut { Key = VirtualKeys.Space, Modifiers = ShortcutModifiers.Shift }];
         session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
         Type(session, "kyou");
         result = session.HandleKey(VirtualKeys.Space, ' ', true, false, false, false, "");
@@ -542,7 +540,7 @@ internal static class SessionFacadeTests
         Assert.True(!session.Direct && !session.Toggled, "Ctrl+Shift+Space では切り替えない");
 
         // Space 以外の切替キーでも印を立てる (フロントエンドがモードを合わせられるように)
-        settings.ToggleKeyboardShortcuts = "Ctrl+Shift+A";
+        settings.ToggleShortcuts = [new ToggleShortcut { Key = 'A', Modifiers = ShortcutModifiers.Control | ShortcutModifiers.Shift }];
         session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionOptions(), () => settings);
         result = session.HandleKey(0x41 /* A */, 'a', true, true, false, false, "");
         Assert.True(result.Consumed && session.Direct, "設定した組み合わせで切り替える");
