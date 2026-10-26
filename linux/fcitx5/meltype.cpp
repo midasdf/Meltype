@@ -436,9 +436,12 @@ public:
         const auto states = key.states();
         // Shift+Space は、fcitx5 の設定 (Hotkey/TriggerKeys) で日本語 / 英数の切替キーになっていることがある。
         // Meltype の本体が切替として使った場合は、fcitx5 の切替キーとして受け取らない (#1033)。
-        bool shiftSpace = vk == 0x20 && (states.test(fcitx::KeyState::Shift) || state->shiftHeld);
+        // Shift を離したことが伝わらず shiftHeld が残っていても、Space 以外には印を付けない (Tab や矢印が
+        // Shift+Tab・Shift+矢印として扱われないようにする)。
+        const bool shift = states.test(fcitx::KeyState::Shift) || (vk == 0x20 && state->shiftHeld);
+        bool shiftSpace = vk == 0x20 && shift;
         int modifiers = 0;
-        if (states.test(fcitx::KeyState::Shift) || state->shiftHeld) modifiers |= 1;
+        if (shift) modifiers |= 1;
         if (states.test(fcitx::KeyState::Ctrl)) modifiers |= 2;
         if (states.test(fcitx::KeyState::Alt)) modifiers |= 4;
         if (states.test(fcitx::KeyState::Super)) modifiers |= 8;
