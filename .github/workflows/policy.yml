@@ -1,0 +1,56 @@
+# PR の件数制限と、投稿者の返事を待っている Issue・PR の期限管理。
+# 書き込み job は必ず main のスクリプトを使い、PR のコードを実行しない。
+name: policy
+
+on:
+  pull_request:
+    paths:
+      - '.github/bot/policy*'
+      - '.github/workflows/policy.yml'
+  pull_request_target:
+    types: [opened, reopened, closed, ready_for_review, converted_to_draft, synchronize, edited, labeled, unlabeled]
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened]
+  issue_comment:
+    types: [created, edited]
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: node --test .github/bot/policy.test.mjs
+
+  enforce:
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: policy-enforce
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          sparse-checkout: .github/bot
+          persist-credentials: false
+      - run: node .github/bot/policy.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -176,6 +176,10 @@ public sealed partial class CompositionDetector
                     var right = raw[(end + 2)..];
                     if (_romaji.Analyze(left.ToLowerInvariant()) is { IsValid: true, Partial: "" or "n" }) continue;
                     if (_romaji.Analyze(right.ToLowerInvariant()) is { IsValid: true, Partial: "" or "n" }) continue;
+                    // 右が同じ子音 2 つで始まり、ローマ字として読める (not|to|tte の tte = って) なら、っ の綴りで続く日本語 (則って) なので、英単語ではない (issue #1030)。
+                    // 読めないもの (ppt・ffmpeg・llm) は英単語のまま (excel|と|ppt)。
+                    if (right.Length >= 2 && char.ToLowerInvariant(right[0]) == char.ToLowerInvariant(right[1]) &&
+                        char.ToLowerInvariant(right[0]) is not ('a' or 'i' or 'u' or 'e' or 'o' or 'n') && _romaji.AnalyzeFragment(right.ToLowerInvariant()).IsValid) continue;
                     if (IsKnownEnglishWord(left + "to")) continue;
                     // 左が英単語でなく、to までで日本語の語 (chotto の っと) になるか、to が英単語の途中 (stories・symptom) なら助詞ではない
                     if (!IsKnownEnglishWord(left) && (EndsWithJapaneseWord(raw.ToLowerInvariant()[..(end + 2)]) || ToInsideEnglishWord(raw.ToLowerInvariant(), end))) continue;
@@ -246,7 +250,7 @@ public sealed partial class CompositionDetector
         }
         // 辞書の短い英語 (pro) だけが先頭で英語になり、残りの英字がかな化される (procrasticle: issue #537)。
         if (level != DetectionLevel.Manual && whole.All(char.IsAsciiLetter) && Memory?.Get(whole.ToLowerInvariant()) != false &&
-            !IsKnownEnglishWord(whole.ToLowerInvariant()) && HasListedEnglishPrefixSplit(whole, segments))
+            !IsKnownEnglishWord(whole.ToLowerInvariant()) && HasListedEnglishPrefixSplit(whole, segments, pending, final))
             return [new CompositionSegment(true, "", whole)];
         return segments;
     }
@@ -288,8 +292,8 @@ public sealed partial class CompositionDetector
         return -1;
     }
 
-    /// <summary>先頭が辞書の短い英語 (pro) で、残りがまだ英字なのに日本語区間になっている (procrasticle)。</summary>
-    private bool HasListedEnglishPrefixSplit(string whole, List<CompositionSegment> segments)
+    /// <summary>先頭が辞書の短い英語 (pro) で、後続の読みにかなにならない英字が残るか (procrasticle)。</summary>
+    private bool HasListedEnglishPrefixSplit(string whole, List<CompositionSegment> segments, string pending, bool final)
     {
         if (segments.Count < 2 || !segments[0].IsEnglish || segments[1].IsEnglish) return false;
         var head = segments[0].Raw;
@@ -302,7 +306,11 @@ public sealed partial class CompositionDetector
         var lowerWhole = whole.ToLowerInvariant();
         for (var len = head.Length + 1; len <= lowerWhole.Length; len++)
             if (IsKnownEnglishWord(lowerWhole[..len])) return false;
-        return segments.Skip(1).All(s => !s.IsEnglish && s.Raw.All(char.IsAsciiLetter));
+        // 読めない英字が残るときだけ補正する。usb + つないで のように、かなになった日本語は区切りを保つ。
+        // 確定時は pending も数える (prozac の c)。n は確定すると「ん」になるので英字には数えない。
+        return segments.Skip(1).All(s => !s.IsEnglish && s.Raw.All(char.IsAsciiLetter)) &&
+            (segments.Skip(1).Any(s => s.Kana.Any(char.IsAsciiLetter)) ||
+             final && _romaji.ConvertLenient(pending.ToLowerInvariant(), final: true).Any(char.IsAsciiLetter));
     }
 
     /// <summary>
@@ -577,6 +585,15 @@ public sealed partial class CompositionDetector
             _romaji.AnalyzeFragment(head) is { IsValid: true, Partial: "" } && !IsKnownEnglishWord(head);
     }
 
+    /// <summary>
+    /// 母音で終わる語のすぐ後ろが ん の単位 (image|n|za|i) か。その ん は語の最後の音に付くので、語は日本語の途中 (いまげんざい)。
+    /// workaround (#1175): english-readable.txt の語の途中から始まる日本語の語 (image|nzai の げんざい) を判定で見ていないので、
+    /// すぐ後ろが ん のときだけ英語として確定しない。「英単語 + 日本語」と「すべて日本語」を、語の境目をまたぐ語も含めて比べる判定ができたら、この関数と呼び出し 2 か所を消す。
+    /// </summary>
+    private static bool NasalContinues(string lower, string? next) =>
+        lower[^1] is 'a' or 'i' or 'u' or 'e' or 'o' && next is [var n, ..] && char.ToLowerInvariant(n) == 'n' &&
+        (next.Length == 1 || char.ToLowerInvariant(next[1]) is not ('a' or 'i' or 'u' or 'e' or 'o' or 'y'));
+
     /// <summary>english-readable.txt の語か (ローマ字として最後まで読めても、日本語の語にならない英単語: open、feature)。</summary>
     public static bool IsReadableEnglishWord(string lower) => ReadableEnglish.Value.ContainsWord(lower);
 
@@ -646,6 +663,12 @@ public sealed partial class CompositionDetector
         var stem = span[..^1];
         if (stem.Length < 3 || !stem.All(char.IsAsciiLetterLower)) return false;
         if (IsCommonJapanese?.Invoke(stem) == true || _japanese.Words.ContainsWord(stem)) return false;
+        // 数字が続き (A4・B5 の紙の大きさ)、小文字側がかなとして読める (dokyumento|wo|A4 の ntowo) なら、名前の最後の大文字ではなく、
+        // 大文字 + 数字の略記 (kamiwo|A4 = 紙をA4: issue #1005)。読めない製品名 (galaxyS24・xperiaZ5) は今までどおり名前。
+        if (next is [var digit, ..] && char.IsAsciiDigit(digit) && _romaji.AnalyzeFragment(stem) is { IsValid: true, Partial: "" }) return false;
+        // 小文字側が助詞で終わる日本語 (kyouha|A = 今日はA、kamiwo|A = 紙をA) なら、日本語 + 大文字 1 文字
+        if (_romaji.Analyze(stem) is { IsValid: true, Partial: "" } &&
+            TrailingParticles.Any(particle => stem.Length > particle.Length && stem.EndsWith(particle, StringComparison.Ordinal))) return false;
         return true;
     }
 
@@ -717,7 +740,8 @@ public sealed partial class CompositionDetector
         if (char.IsAsciiLetterUpper(span[0]) && (exact || prefix || atEnd || (spellWord && next is [var symbol, ..] && !char.IsAsciiLetterOrDigit(symbol)))) return true;
         if (level == DetectionLevel.Manual) return false;
         // ローマ字として最後まで読めても日本語の語にならない英単語 (english-readable.txt)。Manual の後・助詞誤分割除外の後で確定する。
-        if (readableEnglish) return true;
+        // ただし、すぐ後ろが ん (image|n|za|i) なら、語の最後の音の続き: 日本語の途中 (いまげんざい = 今現在、issue #1175)。
+        if (readableEnglish && !NasalContinues(lower, next)) return true;
         // ユーザーが英字 / かなに直して覚えた語。ただし短くてローマ字として読める語 (go、no) は、日本語のすぐ後ろ
         // (nihon|go) では使わない (一度 go を英字で確定しただけで、日本語 が にほんgo になっていた)。
         if (Memory?.Get(lower) is { } learned && !(learned && before < 0 && lower.Length <= 3 && Fragment() is { IsValid: true, Partial: "" })) return learned;
@@ -736,7 +760,7 @@ public sealed partial class CompositionDetector
         }
         // ローマ字として最後まで読めても、日本語の語にならない英単語 (feature = ふぇあつれ、remote = れもて。dictionaries/english-readable.txt、#12)。
         // 日本語の語の始まりにもならない語だけを入れているので、後ろに日本語が続いても (feature|wo) 英語。
-        if (lower.Length >= 3 && ReadableEnglish.Value.ContainsWord(lower)) return true;
+        if (lower.Length >= 3 && ReadableEnglish.Value.ContainsWord(lower) && !NasalContinues(lower, next)) return true;
         // -pedia (pedia / protopedia …)。ローマ字だと ぺぢあ になり、途中の to が助詞「と」に割れる (pro|to|pedia)。
         // wikipedia はスペルチェッカーで足りるが、pedia 単体や未登録の複合はここですくう。
         // CanBeEnglishSpan / 上の早期 return でも同じ IsPediaEnglishWord を通す (通さないとここへ届かない)。
@@ -1122,6 +1146,7 @@ public sealed partial class CompositionDetector
         while (i < units.Count && IsDigit(units[i])) i++;
         var digitLen = Raw(units, digitStart, i).Length;
         if (digitLen is < 1 or > 2) return -1;
+        var digitEnd = i;
         var pendingLetters = i == units.Count && pending.Length > 0 && pending.All(char.IsAsciiLetter) ? pending : "";
         if (i < units.Count && IsLetter(units[i]))
         {
@@ -1135,7 +1160,15 @@ public sealed partial class CompositionDetector
         }
         else if (pendingLetters.Length is < 1 or > 3) return -1;
         var word = Raw(units, start, i) + pendingLetters;
-        return word.Length is >= 3 and <= 6 ? i : -1;
+        if (word.Length is < 3 or > 6) return -1;
+        // 数字の前と後ろが、どちらもかなとして最後まで読める (huuso|ku|6|me|-toru の ku と me) なら、
+        // 略語 (i18n の n、k8s の s、h2o の h) ではなく、数字を挟んだ日本語 (風速6メートル: issue #1017)。
+        // 母音 1 文字 (e2e・o2o の e・o) は、かなとして読めても略語のことが多いので、子音から始まる 2 文字以上のときだけ。
+        var head = Raw(units, start, digitStart).ToLowerInvariant();
+        var tail = (Raw(units, digitEnd, i) + pendingLetters).ToLowerInvariant();
+        if (head.Length >= 2 && tail.Length >= 2 && _romaji.AnalyzeFragment(head) is { IsValid: true, Partial: "" } &&
+            _romaji.AnalyzeFragment(tail) is { IsValid: true, Partial: "" }) return -1;
+        return i;
     }
 
     /// <summary>

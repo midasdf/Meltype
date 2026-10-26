@@ -16,21 +16,8 @@ on:
       - '.github/workflows/mac.yml'
       - '.github/workflows/linux.yml'
       - '.github/workflows/build.yml'
+  # test・core は main の必須チェック。paths で絞ると、当たらない Pull Request で報告されずマージできなくなる。
   pull_request:
-    paths:
-      - 'src/**'
-      - 'native/**'
-      - 'dictionaries/**'
-      - 'tools/**'
-      - 'Meltype.sln'
-      - 'Build-Package.ps1'
-      - 'Install-Meltype.ps1'
-      - 'packaging/**'
-      - 'Casks/**'
-      - 'docs/**'
-      - '.github/workflows/mac.yml'
-      - '.github/workflows/linux.yml'
-      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
