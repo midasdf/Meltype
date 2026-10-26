@@ -116,6 +116,7 @@ final class MeltypeInputController: IMKInputController, ModeServiceTarget {
         if NativeCore.shared.takeModeToggled(session) {
             directInput = NativeCore.shared.isDirect(session)
             codeInput = false
+            NativeCore.shared.setCodeInput(session, false)
             rememberMode(caret: modeIndicatorCaret(client))
         }
         return result.consumed
