@@ -642,14 +642,14 @@ internal static class ToggleShortcutTests
     public static void Shortcut_RejectsUnmodifiedTextAndEditingKeys()
     {
         foreach (var mods in new[] { ShortcutModifiers.None, ShortcutModifiers.Shift })
-        foreach (var key in new[] { 0x20, 0x0D, 0x1B, 0x41, 0x30, 0x09, 0x08, 0x25, 0x2E, 0xC0, 0x70 })
-        {
-            // Shift+Space だけは #1033 で切り替えキーにできる (Shortcut_ShiftSpaceIsAllowed... を参照)。
-            if (mods == ShortcutModifiers.Shift && key == 0x20) continue;
-            var binding = new ToggleShortcut { Key = key, Modifiers = mods };
-            Assert.Equal(ShortcutValidationError.UnmodifiedKey, ToggleShortcutValidator.Validate(binding, new Settings(), []));
-            Assert.Equal(0, new Settings { ToggleShortcuts = [binding] }.Normalize().EffectiveToggleShortcuts.Count, "読み込み時も通常入力を奪わない");
-        }
+            foreach (var key in new[] { 0x20, 0x0D, 0x1B, 0x41, 0x30, 0x09, 0x08, 0x25, 0x2E, 0xC0, 0x70 })
+            {
+                // Shift+Space だけは #1033 で切り替えキーにできる (Shortcut_ShiftSpaceIsAllowed... を参照)。
+                if (mods == ShortcutModifiers.Shift && key == 0x20) continue;
+                var binding = new ToggleShortcut { Key = key, Modifiers = mods };
+                Assert.Equal(ShortcutValidationError.UnmodifiedKey, ToggleShortcutValidator.Validate(binding, new Settings(), []));
+                Assert.Equal(0, new Settings { ToggleShortcuts = [binding] }.Normalize().EffectiveToggleShortcuts.Count, "読み込み時も通常入力を奪わない");
+            }
         foreach (var key in new[] { 0x19, 0xF3, 0xF4, 0x1C, 0x1D })
             Assert.Equal(ShortcutValidationError.None, ToggleShortcutValidator.Validate(new() { Key = key }, new Settings(), []));
         Assert.Equal(ShortcutValidationError.None, ToggleShortcutValidator.Validate(
