@@ -508,19 +508,19 @@ internal sealed class TipServer : IDisposable
         switch (op)
         {
             case "hello":
-            {
-                var process = String(root, "process") ?? "?";
-                var greeting = ActiveFor(process);
-                // Meltype IME のモードでないときも 2 秒ごとに問い合わせが来るので、ログはアプリごとに 1 回だけ。
-                // 名前はアプリの側が送ってくるので、ログを崩さないように短くして、改行などは消す
-                var shown = new string(process.Where(c => !char.IsControl(c) && !char.IsSurrogate(c) && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).Take(64).ToArray());
-                if (greeting && _greeted.Count < MaxGreeted && _greeted.Add(shown)) Log.Info($"Meltype IME: {shown} からつながりました。");
-                var shortcutJson = "[" + string.Join(",", _settings().EffectiveToggleShortcuts
-                    .Select(b => $"{{\"key\":{b.Key},\"mods\":{(int)b.Modifiers}}}")) + "]";
-                // コードエディター・ターミナルのアプリか (DLL は、キャレットが動くたびに入力モードの表示を問い合わせる)
-                var codeApp = _settings().ProfileFor(process + ".exe") == AppProfile.Code;
-                return $"{{\"active\":{(greeting ? "true" : "false")},\"toggleShortcuts\":{shortcutJson},\"code\":{(codeApp ? "true" : "false")},\"directDetection\":{(DirectDetectionFor(process) ? "true" : "false")},{FullWidthSpaceJson()}\"consumed\":false,\"commits\":[],\"view\":null}}";
-            }
+                {
+                    var process = String(root, "process") ?? "?";
+                    var greeting = ActiveFor(process);
+                    // Meltype IME のモードでないときも 2 秒ごとに問い合わせが来るので、ログはアプリごとに 1 回だけ。
+                    // 名前はアプリの側が送ってくるので、ログを崩さないように短くして、改行などは消す
+                    var shown = new string(process.Where(c => !char.IsControl(c) && !char.IsSurrogate(c) && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).Take(64).ToArray());
+                    if (greeting && _greeted.Count < MaxGreeted && _greeted.Add(shown)) Log.Info($"Meltype IME: {shown} からつながりました。");
+                    var shortcutJson = "[" + string.Join(",", _settings().EffectiveToggleShortcuts
+                        .Select(b => $"{{\"key\":{b.Key},\"mods\":{(int)b.Modifiers}}}")) + "]";
+                    // コードエディター・ターミナルのアプリか (DLL は、キャレットが動くたびに入力モードの表示を問い合わせる)
+                    var codeApp = _settings().ProfileFor(process + ".exe") == AppProfile.Code;
+                    return $"{{\"active\":{(greeting ? "true" : "false")},\"toggleShortcuts\":{shortcutJson},\"code\":{(codeApp ? "true" : "false")},\"directDetection\":{(DirectDetectionFor(process) ? "true" : "false")},{FullWidthSpaceJson()}\"consumed\":false,\"commits\":[],\"view\":null}}";
+                }
             case "close":
                 if (sessions.Remove(sid, out var closing) && closing.IsComposing) closing.CommitPending();
                 return Inactive;
@@ -545,46 +545,46 @@ internal sealed class TipServer : IDisposable
                 result = session.CommitPending() with { Consumed = false };
                 break;
             case "key":
-            {
-                if (root.TryGetProperty("direct", out var direct)) session.Direct = direct.ValueKind == JsonValueKind.True;
-                // 入力を覚えないように求める入力欄 (ブラウザーのシークレット / InPrivate ウィンドウ) では学習しない
-                session.Private = IsTrue(root, "private");
-                var wasDirect = session.Direct;
-                // 前に確定してから、キャレットが動いた (DLL がアプリに通したキー・クリック・別の入力欄): 前の語を確定し直さない
-                if (IsTrue(root, "moved"))
                 {
-                    session.ForgetLastCommit();
-                    session.ForgetDirectInput();
+                    if (root.TryGetProperty("direct", out var direct)) session.Direct = direct.ValueKind == JsonValueKind.True;
+                    // 入力を覚えないように求める入力欄 (ブラウザーのシークレット / InPrivate ウィンドウ) では学習しない
+                    session.Private = IsTrue(root, "private");
+                    var wasDirect = session.Direct;
+                    // 前に確定してから、キャレットが動いた (DLL がアプリに通したキー・クリック・別の入力欄): 前の語を確定し直さない
+                    if (IsTrue(root, "moved"))
+                    {
+                        session.ForgetLastCommit();
+                        session.ForgetDirectInput();
+                    }
+                    ApplyPassed(session, root);
+                    var vk = Int(root, "vk");
+                    var ch = Int(root, "ch");
+                    var mods = Int(root, "mods");
+                    // code を付けない DLL (Meltype を更新する前から動いているアプリが、古い DLL を読み込んだまま) は、toggle・mode を送らず、
+                    // キャレットの前も 20 文字しか送らない。コードの入力欄として扱うと、コードの行を日本語にできないので、一般として扱う
+                    var process = IsTrue(root, "code") ? String(root, "process") : null;
+                    var before = UpdateCodeInput(session, process, String(root, "before"));
+                    // 設定「入力モード切り替えキー」は、この経路では読まない (#1033)。
+                    // Meltype IME は DLL が打鍵ごとに direct を送ってくるので、本体が切り替えても次の打鍵で元に戻る。
+                    // 設定は Meltype キーボード (MeltypeEngine) と、Mac 版・Linux 版が使う。
+                    result = session.HandleKey(vk, ch is > 0 and < 0x10000 ? (char)ch : null,
+                        (mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, (mods & 8) != 0, before, String(root, "after"),
+                        toggleShortcuts: false);
+                    switchedToJapanese = wasDirect && !session.Direct;
+                    break;
                 }
-                ApplyPassed(session, root);
-                var vk = Int(root, "vk");
-                var ch = Int(root, "ch");
-                var mods = Int(root, "mods");
-                // code を付けない DLL (Meltype を更新する前から動いているアプリが、古い DLL を読み込んだまま) は、toggle・mode を送らず、
-                // キャレットの前も 20 文字しか送らない。コードの入力欄として扱うと、コードの行を日本語にできないので、一般として扱う
-                var process = IsTrue(root, "code") ? String(root, "process") : null;
-                var before = UpdateCodeInput(session, process, String(root, "before"));
-                // 設定「入力モード切り替えキー」は、この経路では読まない (#1033)。
-                // Meltype IME は DLL が打鍵ごとに direct を送ってくるので、本体が切り替えても次の打鍵で元に戻る。
-                // 設定は Meltype キーボード (MeltypeEngine) と、Mac 版・Linux 版が使う。
-                result = session.HandleKey(vk, ch is > 0 and < 0x10000 ? (char)ch : null,
-                    (mods & 1) != 0, (mods & 2) != 0, (mods & 4) != 0, (mods & 8) != 0, before, String(root, "after"),
-                    toggleShortcuts: false);
-                switchedToJapanese = wasDirect && !session.Direct;
-                break;
-            }
             case "toggle":
                 if (!active) return Inactive;
                 ApplyPassed(session, root);
                 result = new SessionResult(session.SetCodeLine(IsTrue(root, "japanese"), UpdateCodeInput(session, String(root, "process"), String(root, "before"))), [], null);
                 break;
             case "mode":
-            {
-                if (!active) return Inactive;
-                ApplyPassed(session, root);
-                var english = session.CodeEnglishAt(UpdateCodeInput(session, String(root, "process"), String(root, "before")));
-                return Reply(true, new SessionResult(false, [], null), session.CodeInput, english, null);
-            }
+                {
+                    if (!active) return Inactive;
+                    ApplyPassed(session, root);
+                    var english = session.CodeEnglishAt(UpdateCodeInput(session, String(root, "process"), String(root, "before")));
+                    return Reply(true, new SessionResult(false, [], null), session.CodeInput, english, null);
+                }
             case "commit":
                 // クリック・別の入力欄で確定した、アプリが確定した: 前の語を確定し直さない (確定する位置がキャレットと離れている)
                 if (IsTrue(root, "moved"))
