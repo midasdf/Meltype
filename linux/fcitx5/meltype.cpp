@@ -461,23 +461,28 @@ public:
         }
         if (result.flag("consumed")) {
             event.filterAndAccept();
-        } else if (shiftSpace) {
-            // 本体が切替に使わなかった Shift+Space は、アプリにも fcitx5 の切替キーにもせず、今までどおり fcitx5 に任せる
-            // (日本語入力なら全角スペース、英数なら空白)。ここで受け取ると、空白が入らなくなる。
-            event.filter();
-        } else if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Terminal)) {
-            // 変換ボックスが使った矢印・Tab・Esc ではなく、アプリへ通した操作だけを通知する。
-            bool shortcut = (modifiers & (2 | 4 | 8)) != 0;
-            if (native_.caretMoved) native_.caretMoved(state->session(), vk, shortcut ? 1 : 0);
-            bool navigation = shortcut || vk == 0x09 || vk == 0x1B || (vk >= 0x21 && vk <= 0x28) || vk == 0x2E;
-            if (navigation) {
-                // アプリへ通した Esc は vim 等の操作への境界。開いた引用符の追跡も捨てる (旧版の本体も同じ)。
-                if (vk == 0x1B && state->codeInput && native_.setCodeInput) {
-                    native_.setCodeInput(state->session(), 0);
-                    state->codeInput = false;
+        } else {
+            if (shiftSpace) {
+                // 本体が切替に使わなかった Shift+Space は、アプリにも fcitx5 の切替キーにもせず、今までどおり fcitx5 に任せる
+                // (日本語入力なら全角スペース、英数なら空白)。ここで受け取ると、空白が入らなくなる。
+                event.filter();
+            }
+            // ターミナル用の後処理は、本体が使わなかったキーなら Shift+Space かどうかに関わらず行う。
+            // Shift+Space だけここを通さないと、Ctrl+Shift+Space の後に日本語のまま残り、次の j を本体が取り込む (#1034)。
+            if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Terminal)) {
+                // 変換ボックスが使った矢印・Tab・Esc ではなく、アプリへ通した操作だけを通知する。
+                bool shortcut = (modifiers & (2 | 4 | 8)) != 0;
+                if (native_.caretMoved) native_.caretMoved(state->session(), vk, shortcut ? 1 : 0);
+                bool navigation = shortcut || vk == 0x09 || vk == 0x1B || (vk >= 0x21 && vk <= 0x28) || vk == 0x2E;
+                if (navigation) {
+                    // アプリへ通した Esc は vim 等の操作への境界。開いた引用符の追跡も捨てる (旧版の本体も同じ)。
+                    if (vk == 0x1B && state->codeInput && native_.setCodeInput) {
+                        native_.setCodeInput(state->session(), 0);
+                        state->codeInput = false;
+                    }
+                    state->legacyJapanese = false;
+                    syncCanDelete(ic, state);
                 }
-                state->legacyJapanese = false;
-                syncCanDelete(ic, state);
             }
         }
     }
