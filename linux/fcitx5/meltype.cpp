@@ -439,7 +439,6 @@ public:
         // Shift を離したことが伝わらず shiftHeld が残っていても、Space 以外には印を付けない (Tab や矢印が
         // Shift+Tab・Shift+矢印として扱われないようにする)。
         const bool shift = states.test(fcitx::KeyState::Shift) || (vk == 0x20 && state->shiftHeld);
-        bool shiftSpace = vk == 0x20 && shift;
         int modifiers = 0;
         if (shift) modifiers |= 1;
         if (states.test(fcitx::KeyState::Ctrl)) modifiers |= 2;
@@ -462,11 +461,10 @@ public:
         if (result.flag("consumed")) {
             event.filterAndAccept();
         } else {
-            if (shiftSpace) {
-                // 本体が切替に使わなかった Shift+Space は、アプリにも fcitx5 の切替キーにもせず、今までどおり fcitx5 に任せる
-                // (日本語入力なら全角スペース、英数なら空白)。ここで受け取ると、空白が入らなくなる。
-                event.filter();
-            }
+            // 本体が使わなかったキーは、ここで受け取らず fcitx5 とアプリに任せる (ほかのキーと同じ)。
+            // Shift+Space も同じ: 日本語入力では本体が全角スペースとして消費するので (testterminal で確認)、
+            // ここへ来るのは英数やコード入力など本体が使わなかったときだけ。フィルターすると、
+            // その空白がアプリに入らなくなる (#1034)。
             // ターミナル用の後処理は、本体が使わなかったキーなら Shift+Space かどうかに関わらず行う。
             // Shift+Space だけここを通さないと、Ctrl+Shift+Space の後に日本語のまま残り、次の j を本体が取り込む (#1034)。
             if (ic->capabilityFlags().test(fcitx::CapabilityFlag::Terminal)) {
