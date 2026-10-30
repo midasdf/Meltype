@@ -190,7 +190,7 @@ internal static class ZenzaiConverterTests
         // ほかの読み (文節ごとの候補を作るときの きしゃが・きた など) は読みのまま返す。空を返すと失敗と数えられ、3 回で Zenzai を使わなくなる
         using var server = new FakeServer
         {
-            Answer = p => p.Contains("キシャガキタ") ? (p.Contains("外") ? "帰社が北よ" : "汽車が着た") : p.Contains("ニモツヲニカイニハコブ") ? "荷物を2階に運ぶ" : ReadingIn(p),
+            Answer = p => p.Contains("キシャガキタ") ? (p.Contains('外') ? "帰社が北よ" : "汽車が着た") : p.Contains("ニモツヲニカイニハコブ") ? "荷物を2階に運ぶ" : ReadingIn(p),
         };
         // 遅い PC でも時間切れ (5 秒 Zenzai を使わない) にならないよう、待つ時間を長くする
         using var zenzai = new ZenzaiConverter(server.Endpoint, timeoutMs: 5000);

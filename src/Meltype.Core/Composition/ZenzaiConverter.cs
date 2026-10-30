@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.Globalization;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -200,7 +201,7 @@ public sealed class ZenzaiConverter : IKanjiConverter, IDisposable
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (var argument in new[] { "-m", _modelPath, "--host", "127.0.0.1", "--port", port.ToString(), "-c", "1024", "-ngl", "0", "--parallel", "1",
+            foreach (var argument in new[] { "-m", _modelPath, "--host", "127.0.0.1", "--port", port.ToString(CultureInfo.InvariantCulture), "-c", "1024", "-ngl", "0", "--parallel", "1",
                 // zenz の前処理 (gpt2-small-japanese-char) は本家の llama.cpp に無く、読み込めない。gpt-2 に差し替えると本家でも動く (#849 で Serugu さんが確かめた)
                 "--override-kv", "tokenizer.ggml.pre=str:gpt-2" })
                 info.ArgumentList.Add(argument);
@@ -282,7 +283,7 @@ public sealed class ZenzaiConverter : IKanjiConverter, IDisposable
     /// 前の Meltype が強制終了されて残った llama-server (PID ファイルに書いてあるもの) を終わらせる。
     /// PID は使い回されるので、名前に加えて起動した時刻も同じときだけ (ユーザーが自分で動かしている別の llama-server を止めないように)。
     /// </summary>
-    private void KillStaleServer()
+    private static void KillStaleServer()
     {
         try
         {

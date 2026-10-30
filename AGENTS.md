@@ -36,6 +36,10 @@ node tools/check-dictionaries.mjs                           # 辞書を変えた
 
 Linux のクラウド環境では `src/Meltype.Tests` は動きません。`src/Meltype.Core.Tests` で確かめてください。
 
+`--repro`・`--perf` で漢字に変換するには、環境変数 `MELTYPE_MOZC` に Mozc の変換ヘルパーの場所を指定します (指定しないと判定だけで、かなのまま確定します)。
+ヘルパーには、main の `linux.yml` の成果物 `meltype-linux` の zip の中の `Meltype-linux/mozc/meltype_mozc_helper` を使ってください。
+`native/mozc/build-mozc-helper.sh` で手元でビルドするのは、ヘルパーのソースや `MOZC_COMMIT` を変えたときだけにしてください (初回は 30〜40 分かかります)。
+
 ## 必ず守ること
 
 - **新しいソースファイルの先頭** にライセンスと著作権の行を入れる。名前は既存のファイルをまねて `Yukishiro` にせず、変更を頼んだ人 (PR を出す人) の名前にする。分からなければ聞く。

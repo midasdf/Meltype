@@ -7,6 +7,8 @@
 // Issue の本文・コメントは誰でも書けるので、コマンドとして実行しない (値として次の job に渡すだけ)。
 import fs from 'node:fs';
 import path from 'node:path';
+import { codeCell } from './markdown.mjs';
+import { findRelatedIssues, formatRelatedIssueComment } from './issue-relation-candidates.mjs';
 
 const api = process.env.GITHUB_API_URL ?? 'https://api.github.com';
 const repo = process.env.GITHUB_REPOSITORY;
@@ -66,46 +68,47 @@ function lastKey(text) {
 
 const isKeys = text => text.length > 0 && /^[\x20-\x7e]+$/.test(text);
 
+async function findBotComment(issue, kind) {
+  const marker = `${Marker}<!-- ${kind} -->`;
+  for (let page = 1; ; page++) {
+    const comments = await gh('GET', `/issues/${issue}/comments?per_page=100&page=${page}`);
+    const mine = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+    if (mine || comments.length < 100) return mine ?? null;
+  }
+}
+
 async function upsertComment(issue, kind, text) {
   const marker = `${Marker}<!-- ${kind} -->`;
-  const comments = await gh('GET', `/issues/${issue}/comments?per_page=100`);
-  const mine = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+  const mine = await findBotComment(issue, kind);
   const body = `${marker}\n${text}`;
   if (mine) await gh('PATCH', `/issues/comments/${mine.id}`, { body });
   else await gh('POST', `/issues/${issue}/comments`, { body });
 }
 
-async function react(content) {
-  if (event.comment) await gh('POST', `/issues/comments/${event.comment.id}/reactions`, { content }).catch(() => {});
+async function searchIssues(query) {
+  const response = await fetch(api + '/search/issues?q=' + encodeURIComponent(query) + '&per_page=100&page=1', {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'meltype-bot' },
+  });
+  if (!response.ok) throw new Error('Issue search failed: ' + response.status);
+  return response.json();
 }
 
-// 関連しそうな Issue を、根拠つきで挙げる (issue #456)。ラベルや状態は変えず、自動で閉じもしない。
-//   根拠 1: 本文に書かれた Issue の参照 (#123)
-//   根拠 2: 誤判定の報告の「打ったもの」(打ったキー) が、ほかの Issue の本文と同じ (4 文字以上)
-// 失敗しても Issue の処理は続ける (関連の候補が出ないだけ)。
-async function relatedIssues(number, body, keys) {
-  const found = new Map();
+async function updateRelatedIssues(issue) {
   try {
-    const refs = [...(body ?? '').matchAll(/(?<![\w/&])#(\d{1,5})\b/g)].map(m => Number(m[1])).filter(n => n !== number);
-    for (const ref of [...new Set(refs)].slice(0, 5)) {
-      const issue = await gh('GET', `/issues/${ref}`).catch(() => null);
-      if (issue && !issue.pull_request) found.set(ref, { title: issue.title, state: issue.state, reason: '本文で参照されている' });
-    }
-    if (keys && keys.length >= 4 && /^[\x20-\x7e]+$/.test(keys) && !/["\\]/.test(keys)) {
-      const query = encodeURIComponent(`repo:${repo} is:issue "${keys}" in:body`);
-      const response = await fetch(`${api}/search/issues?q=${query}&per_page=6`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'meltype-bot' } });
-      if (response.ok) {
-        for (const item of (await response.json()).items ?? []) {
-          if (item.number !== number && !item.pull_request && !found.has(item.number)) {
-            found.set(item.number, { title: item.title, state: item.state, reason: `同じ「打ったもの」(${code(keys)}) の報告` });
-          }
-        }
-      }
+    const candidates = await findRelatedIssues(issue, { repo, search: searchIssues, getIssue: async number => gh('GET', `/issues/${number}`) });
+    if (candidates.length > 0) {
+      await upsertComment(issue.number, 'related-issues', formatRelatedIssueComment(issue, candidates, repo));
+    } else {
+      const existing = await findBotComment(issue.number, 'related-issues');
+      if (existing) await gh('DELETE', `/issues/comments/${existing.id}`);
     }
   } catch (error) {
-    console.error('関連の Issue を調べられませんでした:', error.message);
+    console.warn('Related-issue search failed; existing comment was left unchanged (' + (error?.message ?? 'unknown error') + ').');
   }
-  return [...found].slice(0, 5).map(([n, v]) => `- #${n} ${md(v.title)} (${v.state === 'open' ? '未解決' : '解決済み'}) — ${v.reason}`);
+}
+
+async function react(content) {
+  if (event.comment) await gh('POST', `/issues/comments/${event.comment.id}/reactions`, { content }).catch(() => {});
 }
 
 const LabelInfo = {
@@ -206,7 +209,7 @@ const Help = [
   '| `/test-repro <SHA> <キー>` | PR のコードで `/repro` | メンテナー |',
   '| `/test-jht <SHA> <文> [/ 読み]` | PR のコードで `/jht` | メンテナー |',
   '| `/test-explain <SHA> <キー>` | PR のコードで `/explain` | メンテナー |',
-  '| `/release <版>` | 版 (例: `1.2.3`) のタグとリリースの下書きを作り、Windows・Mac・Linux の配布物のビルドを始める。csproj・Info.plist の版が <版> でなければ止める | 管理者 |',
+  '| `/release <版>` | 版 (例: `1.2.3`) のタグとリリースの下書きを作り、Windows・Mac・Linux の配布物のビルドを始める。csproj・Info.plist の版が <版> でないか、docs/release-notes/<版>.md が無ければ止める | 管理者 |',
   '| `/pre-release <版>` | `/release` のプレリリース版 (版は `1.2.3-pre.1` の形) | 管理者 |',
   '| `/self-assign` | 自分を Issue の Assignees に入れる (担当になる)。`要トリアージ` の間はメンテナーだけ | だれでも |',
   '| `/help` | この一覧 | だれでも |',
@@ -218,7 +221,7 @@ const Help = [
 //   1. 版の形を確かめる (release: 1.2.3 / pre-release: 1.2.3-pre.1)
 //   2. main の csproj (2 つ)・Info.plist の版が <版> と合うか確かめる (版を上げ忘れた配布を防ぐ: issue #601)
 //   3. タグ v<版> を main の先頭に作る (もうあれば止める)
-//   4. リリースの下書きを作る (リリースノートは自動生成。pre-release は prerelease)
+//   4. リリースの下書きを作る。本文は main の docs/release-notes/<版>.md (配布物にも同じものを同梱する: issue #1207)。無ければ止める。pre-release は prerelease
 //   5. 配布物のビルド (build / mac / linux) を、そのタグで始める。ビルドが終わると、下書きに配布物が付く
 // タグを GITHUB_TOKEN で作ると push の起動が掛からないので、workflow_dispatch で明示的に起動する。
 async function releaseCommand(issue, command, version) {
@@ -239,12 +242,16 @@ async function releaseCommand(issue, command, version) {
   const plist = await read('mac/Resources/Info.plist');
   const plistVersion = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1];
   if (plistVersion !== plain) mismatches.push(`mac/Resources/Info.plist: ${plistVersion ?? '(版なし)'} (期待 ${plain})`);
-  if (mismatches.length > 0) return reply(`❌ main の版が ${version} になっていないので、リリースしません (docs/RELEASE.md の「版を上げる」を先に main に入れてください):\n\n${mismatches.map(m => `- ${m}`).join('\n')}`);
+  // リリースノートは配布物に同梱し、更新したあとの初めての起動で見せるので、先に main に入れておく
+  const notesFile = `docs/release-notes/${version}.md`;
+  const notes = await read(notesFile).catch(() => null);
+  if (!notes?.trim()) mismatches.push(`${notesFile}: (無い。リリースノートを書いて main に入れてください)`);
+  if (mismatches.length > 0) return reply(`❌ main で ${version} のリリースの準備 (版・リリースノート) ができていないので、リリースしません (docs/RELEASE.md の「版を上げる」を先に main に入れてください):\n\n${mismatches.map(m => `- ${m}`).join('\n')}`);
   const tag = `v${version}`;
   if (await gh('GET', `/git/ref/tags/${tag}`).then(() => true).catch(() => false)) return reply(`❌ タグ \`${tag}\` はもうあります。`);
   const sha = (await gh('GET', '/git/ref/heads/main')).object.sha;
   await gh('POST', '/git/refs', { ref: `refs/tags/${tag}`, sha });
-  await gh('POST', '/releases', { tag_name: tag, name: `Meltype ${version}`, draft: true, prerelease: pre, generate_notes: true });
+  await gh('POST', '/releases', { tag_name: tag, name: `Meltype ${version}`, draft: true, prerelease: pre, body: notes });
   const started = [], failed = [];
   for (const workflow of ['build.yml', 'mac.yml', 'linux.yml']) {
     try {
@@ -255,7 +262,7 @@ async function releaseCommand(issue, command, version) {
     }
   }
   await reply([
-    `✅ タグ \`${tag}\` (${sha.slice(0, 7)}) とリリースの下書き (${pre ? 'プレリリース' : '通常'}、リリースノートは自動生成) を作りました。`,
+    `✅ タグ \`${tag}\` (${sha.slice(0, 7)}) とリリースの下書き (${pre ? 'プレリリース' : '通常'}、本文は \`${notesFile}\`) を作りました。`,
     started.length > 0 ? `\nビルドを始めました: ${started.join('・')}。終わると下書きに配布物が付くので、中身を確かめてから公開してください。` : '',
     failed.length > 0 ? `\n⚠ 始められなかったビルド (Actions の画面から ${tag} で手で実行してください):\n${failed.map(f => `- ${f}`).join('\n')}` : '',
   ].join('\n'));
@@ -284,6 +291,8 @@ async function parse() {
 
   if (!event.comment) {
     if (event.action !== 'opened' && event.action !== 'edited') return output({ action: 'none' });
+    const rerunOnEdit = process.env.SEARCH_RELATED_ISSUES_ON_EDIT === 'true';
+    if (event.action === 'opened' || rerunOnEdit) await updateRelatedIssues(event.issue);
     const form = parseForm(event.issue.body);
     const labels = new Set(event.issue.labels.map(l => l.name));
     const add = new Set(osLabels(field(form, 'OS')));
@@ -308,8 +317,6 @@ async function parse() {
 
     const text = [];
     if (problems.length > 0) text.push('報告ありがとうございます。確認のために、もう少し教えてください。', '', ...problems.map(p => `- ${p}`), '', '本文を編集して直してもらえれば、自動でもう一度確認します。', '');
-    const related = await relatedIssues(issue, event.issue.body, misdetection ? field(form, '打ったもの') : '');
-    if (related.length > 0) text.push('<details><summary>🔗 関連しそうな Issue (自動・根拠つき)</summary>', '', ...related, '', '本文の参照と「打ったもの」の一致だけを根拠にした候補です。同じ問題とは限りません (ラベルや状態は変えていません)。', '</details>', '');
     if (reasons.length > 0) text.push('<details><summary>🤖 自動の仕分け</summary>', '', ...reasons.map(r => `- ${r}`), '', '優先度・分類は本文からの見当です。作者が確認したら `要トリアージ` を外します。', '</details>');
     if (text.length > 0) await upsertComment(issue, 'triage', text.join('\n'));
 
@@ -426,8 +433,8 @@ async function parse() {
 
 // 改行は空白にする (空行でコードスパンが切れ、後ろが Markdown として表示されるため)
 const code = text => '`' + String(text ?? '').replace(/\r?\n|\r/g, ' ').replace(/`/g, 'ˋ') + '`';
-// 表のセルに入れるコード。| はコードスパンの中でもセルの区切りになるので \| にする (表の中では | と表示される)
-const cell = text => code(text).replace(/\|/g, '\\|');
+// 表のセルは記号を文字参照にし、元の文字を保って表示する。
+const cell = codeCell;
 // 利用者が書いた文をそのまま出す。リンク・画像・HTML にならないよう ASCII の記号を \ でエスケープし、
 // @ の後ろに幅の無い空白を入れてメンションにしない
 // 改行は空白にする (表のセルの中でも 1 行に収める)

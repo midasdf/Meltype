@@ -172,6 +172,12 @@ public sealed class Settings
     private static JsonSerializerOptions JsonOptions => SettingsJsonContext.Default.Options;
     private static System.Text.Json.Serialization.Metadata.JsonTypeInfo<Settings> JsonType => SettingsJsonContext.Default.Settings;
 
+    private const string SchemaKey = "$schema";
+
+    /// <summary>config.json の JSON Schema (<see cref="SettingsSchema"/>) の場所。エディターが読む。Meltype は使わないが、保存で消さないように持っておく。</summary>
+    [Browsable(false), JsonPropertyName(SchemaKey)]
+    public string? Schema { get; set; } = "./" + SettingsSchema.FileName;
+
     [Category("1. 全般"), DisplayName("Meltype を有効にする")]
     public bool Enabled { get; set; } = true;
 
@@ -482,6 +488,10 @@ public sealed class Settings
      Description("新しい版が公開されたら自動でダウンロードし、次に Meltype を起動したとき (Windows にサインインしたとき) に更新します。トレイの「更新して再起動」で今すぐ更新もできます。設定・学習データはそのまま残ります。")]
     public bool AutoUpdate { get; set; } = true;
 
+    [Category("9. 更新"), DisplayName("プレリリース版も自動で更新する"),
+     Description("ON にすると、正式版の前に公開するプレリリース版 (1.3.1-pre.4 など) も自動更新の対象にします。新しい機能や修正を早く試せますが、不具合や動作の不安定さが含まれることがあります。OFF (標準) では正式版だけを対象にします。")]
+    public bool UpdatePrerelease { get; set; }
+
     [Category("1. 全般"), DisplayName("入力方式"), Description("ローマ字入力 / かな入力 (JIS、α版: 試験中)。Meltype キーボードでは、かな入力を選ぶと JIS かな配列で入力し (Shift+E = ぃ, Shift+Z = っ, Shift+ね = 、)、打ったキーの英字が英単語なら英字で見せます。")]
     [JsonConverter(typeof(InputStyleJsonConverter))]
     public InputStyle InputStyle { get; set; } = InputStyle.Romaji;
@@ -489,10 +499,6 @@ public sealed class Settings
     [Category("2. 判定"), DisplayName("自動判定の強さ"),
      Description("積極的 = 英語らしければすぐ英字 / 標準 = 短い語 (no, to, ga) は前後が英語のときだけ英字 / 慎重 = 確信度が高いときだけ英字 / 手動 = 自動では切り替えず提案だけ (変換ボックスで Tab を押すと提案どおり英字に)。Meltype キーボード・英数状態の検知・かな入力のすべてに効きます。")]
     public DetectionLevel DetectionLevel { get; set; } = DetectionLevel.Balanced;
-
-    [Category("2. 判定"), DisplayName("区切りを点数で選ぶ (α版)"),
-     Description("変換ボックスの中で英語と日本語をどこで区切るかを、あり得る区切り方を全部比べて一番自然なもので決めます (α版: 試験中)。英単語の後ろの「は」(medalsha → medalsは、presidentha → presidentは) などが正しく分かれやすくなります。OFF なら今までどおり、先頭から順に決めます。")]
-    public bool ScoredSegmentation { get; set; }
 
     /// <summary>判定の強さを反映した日本語判定の閾値 (英数状態の検知)。</summary>
     [Browsable(false), JsonIgnore]
@@ -532,6 +538,10 @@ public sealed class Settings
     [Browsable(false)]
     public bool TsfOffered { get; set; }
 
+    /// <summary>リリースノートを最後に見せた版 (更新したあとの初めての起動で一度だけ見せる。issue #1207)。</summary>
+    [Browsable(false)]
+    public string? ReleaseNotesShown { get; set; }
+
     /// <summary>設定画面の下に、項目の説明を出すか (設定画面のチェックボックスで切り替える)。</summary>
     [Browsable(false)]
     public bool SettingsShowHelp { get; set; } = true;
@@ -555,10 +565,10 @@ public sealed class Settings
     /// </summary>
     private static readonly HashSet<string> SharedKeys =
     [
-        nameof(Profiles), nameof(ActiveProfile), nameof(SettingsVersion), nameof(WelcomeShown),
-        nameof(Enabled), nameof(JapaneseKeyboardOnly), nameof(AllowInjectedInput), nameof(FileLog), nameof(LogTypedText), nameof(AutoUpdate),
+        SchemaKey, nameof(Profiles), nameof(ActiveProfile), nameof(SettingsVersion), nameof(WelcomeShown),
+        nameof(Enabled), nameof(JapaneseKeyboardOnly), nameof(AllowInjectedInput), nameof(FileLog), nameof(LogTypedText), nameof(AutoUpdate), nameof(UpdatePrerelease),
         // 入力の方式 (Windows の IME として入力するか) は PC 全体の選び方なので、プロファイルで変えない
-        nameof(Mode), nameof(TsfIntroduced), nameof(TsfOffered),
+        nameof(Mode), nameof(TsfIntroduced), nameof(TsfOffered), nameof(ReleaseNotesShown),
         // 設定画面の見た目は、プロファイルを切り替えても変えない
         nameof(SettingsShowHelp), nameof(SettingsWheelChangesValue),
     ];

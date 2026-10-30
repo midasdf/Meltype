@@ -152,7 +152,7 @@ internal sealed class TipServer : IDisposable
         Log.Info($"Meltype IME のサーバーを開始しました (\\\\.\\pipe\\{PipeName})。");
     }
 
-    private PipeSecurity CreateSecurity()
+    private static PipeSecurity CreateSecurity()
     {
         var user = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("ユーザーの SID が分かりません");
         // 本人・SYSTEM・管理者と、ストアアプリ (AppContainer) からつなげるようにする。
@@ -413,6 +413,8 @@ internal sealed class TipServer : IDisposable
         // このつながりの入力の本体 (UI スレッドからだけ触る。Meltype.exe 自身の UI スレッドのつながりは、UI スレッドが止まっている間に触る)
         var sessions = new Dictionary<string, MeltypeSession>();
         var ownClient = GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var clientProcess) && clientProcess == (uint)Environment.ProcessId;
+        // DLL が送るのはプロセスの名前だけなので、ゲームのフォルダーにあるか (Minecraft の javaw.exe など: #1009) はここで調べる
+        var looksLikeGame = !ownClient && clientProcess != 0 && ForegroundTracker.LooksLikeGame(clientProcess);
         var buffer = new byte[64 * 1024];
         using var message = new MemoryStream();
         try
@@ -434,7 +436,7 @@ internal sealed class TipServer : IDisposable
                 {
                     var request = Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
                     var started = Environment.TickCount64;
-                    reply = FromOwnUiThread(ownClient, request) ? Handle(request, sessions) : Invoke(() => Handle(request, sessions));
+                    reply = FromOwnUiThread(ownClient, request) ? Handle(request, sessions, looksLikeGame) : Invoke(() => Handle(request, sessions, looksLikeGame));
                     LogSlow(request, Environment.TickCount64 - started);
                 }
                 catch (Exception ex)
@@ -477,15 +479,15 @@ internal sealed class TipServer : IDisposable
 
     /// <summary>
     /// このアプリで入力を受け持つか。アプリ別設定で OFF にしたアプリと「ゲーム」のアプリでは、変換ボックスのときと同じく何もしない。
-    /// process は DLL が送る、.exe を除いたプロセスの名前。
+    /// process は DLL が送る、.exe を除いたプロセスの名前。looksLikeGame は、つながってきたアプリがゲームのフォルダーにあるか。
     /// </summary>
-    private bool ActiveFor(string? process)
+    private bool ActiveFor(string? process, bool looksLikeGame)
     {
         if (!Active) return false;
         if (string.IsNullOrEmpty(process)) return true;
         var settings = _settings();
         var name = process + ".exe";
-        return settings.IsAppEnabled(name) && !settings.IsGame(name, looksLikeGame: false);
+        return settings.IsAppEnabled(name) && !settings.IsGame(name, looksLikeGame);
     }
 
     // つながってきたアプリ (ログに 1 回だけ書く)
@@ -497,7 +499,7 @@ internal sealed class TipServer : IDisposable
     /// <summary>ログに書くアプリの名前の数の上限。</summary>
     private const int MaxGreeted = 256;
 
-    internal string Handle(string request, Dictionary<string, MeltypeSession> sessions)
+    internal string Handle(string request, Dictionary<string, MeltypeSession> sessions, bool looksLikeGame = false)
     {
         // 終わる途中 (変換エンジンなどを片付けた後) には何もしない
         if (_stop.IsCancellationRequested) return Inactive;
@@ -510,7 +512,7 @@ internal sealed class TipServer : IDisposable
             case "hello":
                 {
                     var process = String(root, "process") ?? "?";
-                    var greeting = ActiveFor(process);
+                    var greeting = ActiveFor(process, looksLikeGame);
                     // Meltype IME のモードでないときも 2 秒ごとに問い合わせが来るので、ログはアプリごとに 1 回だけ。
                     // 名前はアプリの側が送ってくるので、ログを崩さないように短くして、改行などは消す
                     var shown = new string(process.Where(c => !char.IsControl(c) && !char.IsSurrogate(c) && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).Take(64).ToArray());
@@ -526,7 +528,7 @@ internal sealed class TipServer : IDisposable
                 return Inactive;
         }
 
-        var active = ActiveFor(String(root, "process"));
+        var active = ActiveFor(String(root, "process"), looksLikeGame);
         if (!sessions.TryGetValue(sid, out var session))
         {
             // DLL の側は変換中なのに、入力の続きが無い (つなぎ直した): 新しく始めると、変換中の文字を消したり置き換えたりするので、

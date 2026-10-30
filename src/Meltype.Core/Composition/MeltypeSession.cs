@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.Globalization;
 using System.Text;
 using Meltype.Config;
 using Meltype.Detection;
@@ -113,7 +114,7 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
                 case '\r': builder.Append("\\r"); break;
                 case '\t': builder.Append("\\t"); break;
                 default:
-                    if (c < 0x20) builder.Append("\\u").Append(((int)c).ToString("x4"));
+                    if (c < 0x20) builder.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
                     else builder.Append(c);
                     break;
             }
@@ -197,6 +198,7 @@ public sealed class MeltypeSession
         var userDirectory = Path.Combine(dataDirectory, "dictionaries");
         if (s_shared is not { } shared || shared.Directory != dataDirectory)
         {
+            SettingsSchema.Write(dataDirectory);
             var created = CompositionDetector.CreateDefault(userDirectory);
             var languages = new LanguageMemory(Path.Combine(dataDirectory, "languages.json"));
             created.Memory = languages;
@@ -218,7 +220,6 @@ public sealed class MeltypeSession
         // 検出器は入力欄で共有するので、検出器が見る設定は最後に作った入力欄で読んだもの。
         // OS のスペルチェッカーが無ければ (Linux)、同梱のよく使う英単語の一覧を使う (meeting を英語と分かるように)。
         detector.SpellChecker = wordChecker is { IsAvailable: true } ? wordChecker : Detection.BuiltInWordChecker.Shared;
-        detector.UseScoredSegmentation = () => settings.ScoredSegmentation;
         detector.UseJapanesePunctuationAfterEnglish = () => settings.JapanesePunctuationAfterEnglish;
         var options = shared.Options with
         {

@@ -287,6 +287,7 @@ General Public License for more details.
   <a href="https://github.com/harapeko"><img src="https://github.com/harapeko.png?size=120" width="60" alt="@harapeko" title="@harapeko"></a>
   <a href="https://github.com/milkeclair"><img src="https://github.com/milkeclair.png?size=120" width="60" alt="@milkeclair" title="@milkeclair"></a>
   <a href="https://github.com/r67018"><img src="https://github.com/r67018.png?size=120" width="60" alt="@r67018" title="@r67018"></a>
+  <a href="https://github.com/itouuuuuuuuu"><img src="https://github.com/itouuuuuuuuu.png?size=120" width="60" alt="@itouuuuuuuuu" title="@itouuuuuuuuu"></a>
 </p>
 <!-- sponsors:end -->
 <sub>名前を公開にして応援してくださった方を載せています。</sub>

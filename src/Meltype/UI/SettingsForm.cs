@@ -132,7 +132,7 @@ internal sealed class SettingsForm : Form, IMessageFilter
     }
 
     /// <summary>プロファイルの欄の下: 説明の欄を出すか、ホイールで値を変えるか。</summary>
-    private Control BuildViewOptions()
+    private FlowLayoutPanel BuildViewOptions()
     {
         var bar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(8, 4, 8, 0) };
         _showHelp.Checked = _draft.SettingsShowHelp;
@@ -174,7 +174,7 @@ internal sealed class SettingsForm : Form, IMessageFilter
     }
 
     /// <summary>上のプロファイルの欄: 選ぶと、そのプロファイルの値を画面に読み込む。新規は今の値を写して作る。</summary>
-    private Control BuildProfileBar()
+    private FlowLayoutPanel BuildProfileBar()
     {
         var bar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(8, 8, 8, 0) };
         var label = new Label { Text = "プロファイル:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 0, 0) };
@@ -351,6 +351,7 @@ internal sealed class SettingsForm : Form, IMessageFilter
         if (type == typeof(bool))
         {
             var toggle = Toggle();
+            if (property.Name == nameof(Settings.UpdatePrerelease)) toggle.Toggled += (_, _) => ConfirmPrerelease(toggle);
             return new Binding(property, toggle,
                 s => toggle.Checked = (bool)property.GetValue(s)!,
                 s => property.SetValue(s, toggle.Checked));
@@ -651,7 +652,7 @@ internal sealed class SettingsForm : Form, IMessageFilter
     /// 色の設定 (#RRGGBB) の部品。手で書くほか、Windows の色の選択画面で選べる。
     /// 横の見本は今の色で、空・読めない値なら既定の色 (fallback) を出す。
     /// </summary>
-    private static Control ColorEditor(Color fallback, out TextBox text)
+    private static UserControl ColorEditor(Color fallback, out TextBox text)
     {
         var box = text = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "空なら既定の色" };
         var swatch = new Panel { Width = 28, Dock = DockStyle.Right, BorderStyle = BorderStyle.FixedSingle };
@@ -804,6 +805,20 @@ internal sealed class SettingsForm : Form, IMessageFilter
     private void LoadFrom(Settings settings)
     {
         foreach (var binding in _bindings) binding.Load(settings);
+    }
+
+    /// <summary>
+    /// 「プレリリース版も自動で更新する」を OFF から ON にしたときだけ確かめる (issue #1206)。キャンセルなら OFF に戻す。
+    /// ON から OFF にするときと、設定を読み込んだとき (利用者の操作でないとき) は何も聞かない。
+    /// </summary>
+    private void ConfirmPrerelease(ToggleSwitch toggle)
+    {
+        if (!toggle.Checked) return;
+        var answer = MessageBox.Show(this,
+            "プレリリース版は、正式版の前に試してもらうための版です。不具合や動作の不安定さが含まれることがあります。\n\n" +
+            "プレリリース版も自動で更新するようにしますか？ (「OK」で有効にします。あとから OFF に戻せます)",
+            "プレリリース版の自動更新", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.OK) toggle.Checked = false;
     }
 
     /// <summary>画面の内容を設定にする。画面に出していない項目は引き継ぎ、編集中の正規化では除外ログ・通知を出さない。</summary>
