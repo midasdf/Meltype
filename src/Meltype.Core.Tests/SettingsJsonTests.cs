@@ -1,12 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 0924haruto12
 
+using System.Text.Json;
 using Meltype.Config;
 
 namespace Meltype.Tests;
 
 internal static class SettingsJsonTests
 {
+    [Test]
+    public static void SettingsJson_ShowGuideDefaultsOnAndRoundTrips()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "meltype-guide-settings-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "config.json");
+            foreach (var (json, expected) in new[] { ("{}", true), ("{\"ShowGuide\":true}", true), ("{\"ShowGuide\":false}", false) })
+            {
+                File.WriteAllText(path, json);
+                var settings = Settings.Load(path);
+                using var saved = JsonDocument.Parse(settings.ToJson());
+                Assert.Equal(expected, saved.RootElement.GetProperty("ShowGuide").GetBoolean(), "省略時はガイドを表示し、明示した値を読む");
+                settings.Clone().Save(path);
+                using var loaded = JsonDocument.Parse(Settings.Load(path).ToJson());
+                Assert.Equal(expected, loaded.RootElement.GetProperty("ShowGuide").GetBoolean(), "複製・保存・再読込で表示設定を保つ");
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     [Test]
     public static void SettingsJson_TsfIndicatorIsOptInAndRoundTrips()
     {

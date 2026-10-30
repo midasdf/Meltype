@@ -45,7 +45,9 @@ public sealed class RomajiTypoCorrector
         foreach (var line in Detection.DictionarySource.DataLines(readingsText))
         {
             var parts = line.Split('\t');
-            if (parts.Length > 1) AddConjugations(parts[0], parts[1], forms);
+            if (parts.Length < 2) continue;
+            // 同じ読みで活用の違う語 (くる = 繰る v5r・来る vk) は , でつないである
+            foreach (var kind in parts[1].Split(',')) AddConjugations(parts[0], kind, forms);
         }
         return PackedWordSet.FromWords(forms.Where(form => !readings.Contains(form)));
     }
@@ -104,7 +106,9 @@ public sealed class RomajiTypoCorrector
         switch (kind)
         {
             case "v1":
-                if (word[^1] == 'る') forms.Add(stem);
+                if (word[^1] != 'る') break;
+                // て・た 形も 1 語にする: 語幹が 1 文字 (み・ね) だと 1 文字の語の重みになり、み|て が英単語 mite に負ける
+                foreach (var ending in (string[])["", "て", "た"]) forms.Add(stem + ending);
                 break;
             case "i":
                 if (word[^1] != 'い') break;
@@ -112,7 +116,7 @@ public sealed class RomajiTypoCorrector
                 if (word == "いい") foreach (var ending in (string[])["よく", "よかっ", "よけれ"]) forms.Add(ending);
                 break;
             case "vk":
-                if (word.EndsWith("くる", StringComparison.Ordinal)) foreach (var form in (string[])["き", "こ", "く", "くれ"]) forms.Add(word[..^2] + form);
+                if (word.EndsWith("くる", StringComparison.Ordinal)) foreach (var form in (string[])["き", "きて", "きた", "こ", "く", "くれ"]) forms.Add(word[..^2] + form);
                 break;
             case "vs":
                 if (word.EndsWith("する", StringComparison.Ordinal)) foreach (var form in (string[])["し", "さ", "せ", "すれ", "しろ"]) forms.Add(word[..^2] + form);

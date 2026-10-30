@@ -45,6 +45,9 @@ public sealed partial class CompositionDetector
     private const double UnknownLetterCost = 1.5;
     // 入力の最後の、知っている英単語の頭 (insta)。英単語 + 日本語 1 音 (ins + た) より軽く、日本語の語より重い
     private const double EnglishPrefixCost = 2.5;
+    // ローマ字として読める知らない語 + . + ドメイン・拡張子 (hoge.io・llama.cpp) をまとめた区間は、知っている英単語の重み + . の前の 1 文字ごとにこの重み
+    // (前が長いほど、句点の後ろの日本語 junbigadekita.|deha と読む方が自然になる)
+    private const double ReadableDomainLetterCost = 0.25;
     // 知らない語の大文字 1 文字
     private const double UnknownUpperCost = 1;
     // 大文字で始まり 2 文字目が小文字の 3 文字以上の知らない語 (Tanaka・McKinsey) の小文字 1 文字
@@ -98,6 +101,9 @@ public sealed partial class CompositionDetector
         public static LatticeState FromKey(int key) => new((Side)(key & 3), (key & 4) != 0, (key & 8) != 0, (key & 16) != 0, (key & 32) != 0, (key & 64) != 0);
         public bool IsEnglish => Side is Side.English or Side.Sentence;
     }
+
+    /// <summary>調べる用 (--segments): 区間分けのたびに、最後の状態ごとの一番軽い道と、候補ごとの重み (+) を 1 行ずつ渡す。* が選んだ道。</summary>
+    internal Action<string>? LatticeTrace { get; set; }
 
     private List<CompositionSegment> FindSpansByReading(IReadOnlyList<CompositionUnit> units, string pending, bool? precedingEnglish, bool? followingEnglish,
         DetectionLevel level, bool englishSentence, bool kanaInput, double extraEnglishBias = 0)
@@ -198,7 +204,10 @@ public sealed partial class CompositionDetector
             {
                 step = cost;
                 if (state.Side == Side.Sentence) step += SentenceSwitchCost;
-                else if (state.IsEnglish && !edge.Particle) step += SwitchCost;
+                // 3 文字以上の英単語の後ろの、助詞と同じかなで始まる語 (java|のこ・java|でかく) も、助詞からの切り替えと同じ重みにする
+                // (日本語の道だけが の|こ を のこ にまとめられて、英語が負ける。so|ですか・ma|のなか のような 2 文字の語は除く)
+                else if (state.IsEnglish && !edge.Particle &&
+                         !(edge.Kana.Length > 1 && NounParticles.Contains(edge.Kana[..1]) && from.Edge.English && from.Edge.End - from.Edge.Start >= 3)) step += SwitchCost;
                 // 前の英語の文脈からの切り替えは、英語の語から始めた道も最初の日本語で数える (hello + sushi|が を すしが と同じ重さの差で比べる)
                 if (state.ContextSwitch && edge.Start > 0) step += englishSentence ? SentenceSwitchCost : SwitchCost;
                 next = new LatticeState(Side.Japanese, edge.Particle, state.AllEnglish && !edge.Letters, false);
@@ -221,13 +230,15 @@ public sealed partial class CompositionDetector
 
             // 記号・数字の決まり (状態によらないもの)
             var forced = -1;
+            // ローマ字として読める語 + . + ドメイン・拡張子 (llama.cpp・hoge.io): 句点の後ろの日本語 (ryoukaidesu.|deha) と重みで比べる
+            var domain = unit >= 0 && !kanaInput && englishLevel ? ReadableStemDotSuffixEnd(units, unit, pending) : -1;
             if (unit >= 0 && !kanaInput)
             {
-                if (englishLevel) forced = ReadableStemDotSuffixEnd(units, unit, pending);
-                if (forced < 0) forced = LeadingDotfileEnd(units, unit, pending, level);
+                forced = LeadingDotfileEnd(units, unit, pending, level);
                 if (forced < 0) forced = UserNameEnd(units, unit, pending);
                 if (forced < 0 && englishLevel) forced = HyphenatedWordEnd(units, unit, pending);
                 if (forced < 0 && englishLevel) forced = NumeronymEnd(units, unit, pending);
+                if (forced < 0 && englishLevel) forced = VersionSuffixEnd(units, unit, pending);
             }
 
             for (var key = 0; key < LatticeState.Count; key++)
@@ -243,6 +254,9 @@ public sealed partial class CompositionDetector
                     OfferEdge(node, state, new LatticeEdge(p, to, true, "", false, false), KnownEnglishCost);
                     continue;
                 }
+                if (domain > unit)
+                    OfferEdge(node, state, new LatticeEdge(p, domain == units.Count ? length : _preparedRawOffsets[domain], true, "", false, false),
+                        KnownEnglishCost + ReadableDomainLetterCost * (text.IndexOf('.', p) - p));
                 // 英文の中の記号 (, . ! ? -) は半角のまま
                 if (unit >= 0 && !kanaInput && IsAsciiSymbol(units[unit]) && state.PreviousEnglish && state.AllEnglish &&
                     KeepsPunctuationAfterEnglish(units, unit, pending, precedingEnglish))
@@ -258,6 +272,7 @@ public sealed partial class CompositionDetector
 
         LatticeNode? chosen = null;
         var chosenCost = double.MaxValue;
+        var finals = new List<(double Cost, LatticeState State, LatticeNode Node)>();
         for (var key = 0; key < LatticeState.Count; key++)
         {
             if (best[length, key] is not { } node) continue;
@@ -266,10 +281,23 @@ public sealed partial class CompositionDetector
             if (state.Sokuon) cost += DanglingSokuonCost;
             if (followingEnglish == true && state.Side == Side.Japanese && !state.Particle) cost += SwitchCost;
             if (followingEnglish == false && state.IsEnglish && node.Edge.English) cost += SwitchCost;
+            finals.Add((cost, state, node));
             if (cost < chosenCost)
             {
                 chosen = node;
                 chosenCost = cost;
+            }
+        }
+        if (LatticeTrace is { } trace)
+        {
+            trace($"lattice {text} (level {level}, preceding {precedingEnglish?.ToString() ?? "-"}, following {followingEnglish?.ToString() ?? "-"}, bias {englishBias})");
+            foreach (var (cost, state, node) in finals.OrderBy(f => f.Cost))
+            {
+                var path = new List<string>();
+                for (var at = node; at.Previous is { } previous; at = previous)
+                    path.Add($"{(at.Edge.English ? "EN" : at.Edge.Neutral ? "--" : "JA")}:{text[at.Edge.Start..at.Edge.End]}{(at.Edge.Kana.Length > 0 && at.Edge.Kana != text[at.Edge.Start..at.Edge.End] ? "=" + at.Edge.Kana : "")}+{at.Cost - previous.Cost:0.##}");
+                path.Reverse();
+                trace($"  {(node == chosen ? "*" : " ")} {cost:0.00} {state.Side}{(state.Particle ? " particle" : "")}{(state.Sokuon ? " sokuon" : "")}: {string.Join(" ", path)}");
             }
         }
         var edges = new List<LatticeEdge>();

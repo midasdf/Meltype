@@ -788,6 +788,17 @@ public sealed class CompositionText
                 kana += pending;
                 pending = "";
             }
+            // 打っている途中の w の連続 (くさ + www) は、確定のときと同じく笑いの w で見せる (ww を っw にしない。wwa = っわ は続きで読む)
+            if (!final && isLast && Mode == DisplayMode.Auto && !KanaInput && pending is "w" or "W")
+            {
+                var laughter = 0;
+                while (laughter < _units.Count && _units[^(laughter + 1)] is { Raw: "w" or "W", Kana: "っ" }) laughter++;
+                if (laughter > 0 && kana.Length >= laughter)
+                {
+                    pending = string.Concat(_units.Skip(_units.Count - laughter).Select(u => u.Raw)) + pending;
+                    kana = kana[..^laughter];
+                }
+            }
             builder.Append(convert is not null && kana.Length > 0 ? convert(kana) : kana);
             builder.Append(pending);
         }

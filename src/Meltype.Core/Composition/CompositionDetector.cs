@@ -324,7 +324,7 @@ public sealed partial class CompositionDetector
 
     /// <summary>
     /// ローマ字として読める英字のすぐ後ろに、読めない拡張子が続くとき (llama.cpp → っぁま。cpp)。
-    /// 語の先頭から拡張子までを 1 つの英語区間にする。大文字や知っている英単語 (Meltype.amr) は、拡張子を別区間のままにする。
+    /// 語の先頭から拡張子までを 1 つの英語区間の候補にする (句点の後ろの日本語 ryoukaidesu.|deha とは重みで比べる)。大文字や知っている英単語 (Meltype.amr) は、拡張子を別区間のままにする。
     /// 数字の前 (3.14desu)・小数 (soudesu.1.5)・最後まで読める語 (Meltype.desu) は対象外。
     /// </summary>
     private int ReadableStemDotSuffixEnd(IReadOnlyList<CompositionUnit> units, int start, string pending)
@@ -336,7 +336,8 @@ public sealed partial class CompositionDetector
         while (dot < units.Count && units[dot].Raw.Length > 0 && units[dot].Raw.All(char.IsAsciiLetter)) dot++;
         if (dot >= units.Count || units[dot].Raw != ".") return -1;
         var stem = Raw(units, start, dot);
-        if (IsKnownEnglishWord(stem)) return -1;
+        // 小文字の、日本語の語と同じ綴りの固有名詞 (wakatte) は、区間分けでかなになるので、ここでドメインとしてまとめる (wakatte.tv)
+        if (IsKnownEnglishWord(stem) && !IsLowercaseJapaneseProperNoun(stem)) return -1;
         var suffix = DotSuffixEnd(units, dot + 1, pending);
         if (suffix <= dot + 1) return -1;
         // 1.5 のような小数は拡張子ではない (soudesu.1.5 → そうです。1.5)。cpp のような英字の拡張子だけをまとめる。
@@ -398,6 +399,18 @@ public sealed partial class CompositionDetector
             if ((readable ? DomainSuffixes.Contains(stem) : Known(stem)) &&
                 (afterParticle.Length == 0 || Readable(afterParticle) || stem.Length >= 3 && IsKnownEnglishWord(afterParticle))) return k;
             if (!readable && afterParticle.Length > 0 && Readable(rest) && !Readable(stem)) return k;
+        }
+        // 読めない語の後ろに、(助詞 +) 3 音以上の日本語の語から始まる読める語が続く (.env|fairu、.zshrc|nosettei)。短い語 (.js|on のおん) では分けない
+        for (var k = start + 1; !readable && k < end; k++)
+        {
+            var stem = Raw(units, start, k).ToLowerInvariant();
+            if (Readable(stem)) continue;
+            var rest = (Raw(units, k, end) + (end == n ? pending : "")).ToLowerInvariant();
+            if (!Readable(rest)) continue;
+            var particle = TrailingParticles.FirstOrDefault(p => rest.StartsWith(p, StringComparison.Ordinal)) ?? "";
+            var kana = _romaji.ConvertLenient(rest[particle.Length..], final: true);
+            for (var length = 3; length <= kana.Length; length++)
+                if (RomajiTypoCorrector.CommonWordCost(kana.AsSpan(0, length)) is not null || CommonReadings.Katakana.Contains(kana.AsSpan(0, length))) return k;
         }
         // 最後までローマ字として読める語 (Meltype.desu) は、ふつうに判定する
         return readable ? -1 : end;
@@ -468,6 +481,44 @@ public sealed partial class CompositionDetector
         }
         return -1;
     }
+
+    /// <summary>
+    /// 版の番号 (1.4.1・1.10.0) の後ろの、- から始まるプレリリースの名前 (-pre・-beta.2・-rc1) の終わり。無ければ -1。
+    /// 名前は PrereleaseNames の語 + 数字 + (. 数字) の並び。後ろの英字 (-pre|wodashita) からは日本語。
+    /// </summary>
+    private static int VersionSuffixEnd(IReadOnlyList<CompositionUnit> units, int start, string pending)
+    {
+        static bool IsDigits(string raw) => raw.Length > 0 && raw.All(char.IsAsciiDigit);
+        var n = units.Count;
+        if (units[start].Raw != "-") return -1;
+        // - の前が x.y.z の 3 つの数字 (1.5-desu・3.14-kai は日本語のまま)
+        var before = start;
+        for (var part = 0; part < 3; part++)
+        {
+            var digits = before;
+            while (before > 0 && IsDigits(units[before - 1].Raw)) before--;
+            if (before == digits || part < 2 && (before == 0 || units[--before].Raw != ".")) return -1;
+        }
+        // 一番長く一致する名前 (pre|view でなく preview) の終わり。最後まで打っている途中 (-pr) は、名前の頭なら入力の最後まで
+        var end = -1;
+        var name = "";
+        var k = start + 1;
+        for (; k < n && PrereleaseNames.Any(p => p.StartsWith(name + units[k].Raw.ToLowerInvariant(), StringComparison.Ordinal)); k++)
+        {
+            name += units[k].Raw.ToLowerInvariant();
+            if (PrereleaseNames.Contains(name)) end = k + 1;
+        }
+        if (k == n && name.Length + pending.Length > 0 && PrereleaseNames.Any(p => p.StartsWith(name + pending.ToLowerInvariant(), StringComparison.Ordinal))) return n;
+        if (end < 0) return -1;
+        while (end < n && IsDigits(units[end].Raw)) end++;
+        while (end + 1 < n && units[end].Raw == "." && IsDigits(units[end + 1].Raw))
+            for (end++; end < n && IsDigits(units[end].Raw); end++) { }
+        return end;
+    }
+
+    private static readonly string[] PrereleaseNames =
+        ["alpha", "beta", "canary", "dev", "edge", "experimental", "final", "hotfix", "insiders", "lts", "next", "nightly", "pre", "preview", "rc", "release",
+         "snapshot", "stable", "test", "twilight", "unstable"];
 
     /// <summary>英語の短縮形 (don't, it's, I'm, you're, we'll, can't)。' の前が英単語か n't の形。</summary>
     private bool IsContraction(string span)

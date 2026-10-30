@@ -153,6 +153,10 @@ internal static class Quality
         new("日本語", "gare-ji", "がれーじ"),
         new("日本語", "midika", "みぢか"),           // issue #1179
         new("日本語", "midikani", "みぢかに"),
+        // 英単語の midi は英字のまま (issue #1122)
+        new("英語", "midi", "midi"),
+        new("混在", "midiwo", "midiを"),
+        new("混在", "midinofairu", "midiのふぁいる"),
         // 語のすぐ後ろが ん なら、語の最後の音の続き (いまげんざい = 今現在。issue #1175)
         new("日本語", "imagenzai", "いまげんざい"),
         new("日本語", "wakatte", "わかって"),         // issue #1231 (Wakatte.TV は固有名詞のまま: Symbols_StartComposition)

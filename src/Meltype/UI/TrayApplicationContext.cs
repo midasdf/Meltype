@@ -16,6 +16,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private static readonly Meltype.Composition.GitHubIssueTitles GitHubTitlesShared = new();
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _statusItem;
+    // Zenzai の状態 (「Zenzai を使う」が ON のときだけ出す。issue #1152)
+    private readonly ToolStripMenuItem _zenzaiItem = new() { Enabled = false, Visible = false };
     private readonly ToolStripMenuItem _enabledItem;
     private readonly HotkeyWindow _hotkey;
     private readonly HotkeyWindow _registerHotkey;
@@ -132,6 +134,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _keyboardModeItem = new ToolStripMenuItem("Meltype キーボード (変換ボックスで入力)", null, (_, _) => SetMode(InputMode.Keyboard));
         _tsfModeItem = new ToolStripMenuItem("Meltype IME (入力欄に直接入力)", null, (_, _) => SetMode(InputMode.Tsf));
         menu.Items.Add(_statusItem);
+        menu.Items.Add(_zenzaiItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_enabledItem);
         if (!AppPaths.IsPortable) menu.Items.Add(_tsfModeItem);
@@ -598,6 +601,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             status = _engine.KeyboardDirect ? "キーボード: 直接入力 (半角/全角 で日本語)" : "キーボード: 日本語";
         }
         _statusItem.Text = status;
+        var zenzai = _composition.ZenzaiStatus(settings.UseZenzai, settings.ZenzaiServerPath, settings.ZenzaiModelPath);
+        _zenzaiItem.Visible = zenzai is not null;
+        if (zenzai is not null) _zenzaiItem.Text = $"Zenzai: {zenzai}";
         var tip = $"Meltype — {status}";
         _tray.Text = tip.Length > 63 ? tip[..63] : tip;
     }

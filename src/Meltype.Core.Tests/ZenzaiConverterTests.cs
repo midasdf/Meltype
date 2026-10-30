@@ -236,6 +236,48 @@ internal static class ZenzaiConverterTests
     }
 
     [Test]
+    public static void Issue1152_ShowsWhetherZenzaiAnswered()
+    {
+        // #1152: Zenzai が答えたかを、変換ボックスとトレイに出す
+        using var server = new FakeServer { Answer = _ => "単位を取る" };
+        using var zenzai = new ZenzaiConverter(server.Endpoint, timeoutMs: 5000);
+        var useZenzai = true;
+        var hybrid = new HybridConverter(() => ConversionEngine.Mozc, null, new CompositionTests.FakeConverter(), null, () => useZenzai ? zenzai : null);
+        Assert.True(hybrid.ConvertClauses("たんいをとる") is { } z && z.All(c => c.Zenzai), "Zenzai の答えの文節に印を付ける");
+        // 変換ボックスの説明の行に出す。Zenzai の答えを出しているときだけ
+        var k = new CompositionTests.Keyboard(converter: hybrid);
+        k.Type("tanniwotoru ");
+        Assert.True(k.Host.View!.Hint.StartsWith("Zenzai", StringComparison.Ordinal), k.Host.View.Hint);
+        Assert.Equal("Zenzai", k.Host.View.ContextHint, "固定ガイドを隠す表示にも、変換エンジンの案内だけを残す");
+        useZenzai = false;
+        Assert.True(hybrid.ConvertClauses("たんいをとる") is { } m && !m.Any(c => c.Zenzai), "Zenzai を使わなければ印を付けない");
+        var mozc = new CompositionTests.Keyboard(converter: hybrid);
+        mozc.Type("tanniwotoru ");
+        Assert.True(!mozc.Host.View!.Hint.Contains("Zenzai", StringComparison.Ordinal), "Zenzai の答えでなければ出さない: " + mozc.Host.View.Hint);
+        Assert.True(mozc.Host.View.ContextHint is null, "Zenzai の答えでなければ文脈の案内にも出さない");
+        // 学習した変換で Zenzai の答えと違う文字列にした文節は数えない
+        useZenzai = true;
+        var history = new ConversionHistory(null);
+        history.Remember("とる", "採る");
+        history.Remember("たんいを", "単位お");
+        var learned = new CompositionTests.Keyboard(converter: hybrid, history: history);
+        learned.Type("tanniwotoru ");
+        Assert.Equal("単位お採る", learned.Showing ?? "", "学習した変換を出す");
+        Assert.True(!learned.Host.View!.Hint.Contains("Zenzai", StringComparison.Ordinal), "学習で変わった文節には出さない: " + learned.Host.View.Hint);
+        Assert.True(learned.Host.View.ContextHint is null, "学習で置き換わった文節の Zenzai 表示は残さない");
+
+        using var holder = new ZenzaiHolder((s, m) => new ZenzaiConverter(server.Endpoint, timeoutMs: 5000));
+        Assert.True(holder.Status is null, "OFF・まだ使っていなければ出さない");
+        holder.Get("server", "model");
+        Assert.Equal("使えます", holder.Status ?? "");
+        using var missing = new ZenzaiHolder();
+        missing.Get("/no/such/llama-server", "/no/such.gguf");
+        Assert.Equal("llama-server かモデルが見つかりません", missing.Status ?? "");
+        holder.Get("", "");
+        Assert.True(holder.Status is null, "OFF にしたら出さない");
+    }
+
+    [Test]
     public static void Hybrid_ZenzaiThatCannotBeCreated_FallsBackToOtherEngine()
     {
         // #973: 同梱の .NET に System.Net.Http が無く、Zenzai を作るたびに例外になった。例外が入力まで届き、日本語を打てなくなった

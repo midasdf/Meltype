@@ -659,6 +659,12 @@ internal sealed class CompositionService : ICompositionHost, IDisposable
     /// <summary>変換ボックスを出したまま確定した文字 (次に見せるときに、その幅だけ変換ボックスを右へずらす)。</summary>
     private string _committedWhileVisible = "";
 
+    /// <summary>Zenzai の今の状態 (トレイのメニューに出す)。OFF なら null。</summary>
+    public string? ZenzaiStatus(bool useZenzai, string serverPath, string modelPath) =>
+        !useZenzai ? null
+        : serverPath.Trim().Length == 0 || modelPath.Trim().Length == 0 ? "llama-server かモデルの場所が指定されていません"
+        : _zenzai.Status ?? "まだ起動していません (日本語を変換すると起動します)";
+
     public void Show(CompositionView view)
     {
         if (_window.Visible)
