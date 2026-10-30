@@ -253,6 +253,11 @@ class MeltypeEngine(IBus.Engine):
         # 合わせないと、次に 半角/全角 を押したときの切り替え先 (not self._direct) と、役割キーの判定がずれる。
         if _take_mode_toggled is not None and _take_mode_toggled(self._session):
             self._direct = bool(_is_direct(self._session)) if _is_direct is not None else not self._direct
+            # 利用者が自分で切り替えたときは、コード入力の保護より意思を優先する (Mac の「かな」キーと同じ)。
+            # 変わったときだけ本体へ伝える (同じ値で呼ぶと本体が行の追跡を落とす)。
+            if self._code_input and _set_code_input is not None:
+                _set_code_input(self._session, 0)
+            self._code_input = False
         # アプリに通したキー (矢印・Tab・Ctrl など) はキャレットを動かすかもしれない。
         # コード行を日本語にしていたら、別の場所へ移った時点で英数に戻す。
         if not consumed:

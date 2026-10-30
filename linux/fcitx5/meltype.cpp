@@ -356,6 +356,8 @@ public:
     bool codeInput = false;
     // 明示的な日本語切り替えの入口が無い旧版の本体にだけ使う。
     bool legacyJapanese = false;
+    // 切替で A / あ を出したか。次のキーで 1 回だけ消す (#1034)。
+    bool modeShown = false;
     // 変換ボックス (preedit) を出しているか。出している間は、周りの文字 (preedit を含む) を本体に渡さない
     bool preeditVisible = false;
 
@@ -387,6 +389,11 @@ public:
         if (!loaded_) return;
         auto *ic = event.inputContext();
         auto *state = ic->propertyFor(&factory_);
+        // 直前の切替で出した A / あ は、次のキーで消す (#1034)。
+        if (state->modeShown) {
+            clearMode(ic);
+            state->modeShown = false;
+        }
         // Shift そのものの押し下げと離しを覚えておく (Space には Shift が付いてこないことがある: #1033)
         const auto shiftSym = event.key().sym();
         if (shiftSym == FcitxKey_Shift_L || shiftSym == FcitxKey_Shift_R) {
@@ -456,7 +463,11 @@ public:
         // 本体に合わせる (#1033)。合わせないと、次に 半角/全角 を押したときの切り替え先がずれる。
         if (native_.takeModeToggled && native_.takeModeToggled(state->session())) {
             state->direct = native_.isDirect ? native_.isDirect(state->session()) != 0 : !state->direct;
+            // 利用者が自分で切り替えたときは、コード入力の保護より意思を優先する (Mac の「かな」キーと同じ)。
+            if (native_.setCodeInput) native_.setCodeInput(state->session(), 0);
+            state->codeInput = false;
             showMode(ic, state->direct);
+            state->modeShown = true;
         }
         if (result.flag("consumed")) {
             event.filterAndAccept();
@@ -551,6 +562,12 @@ private:
     // 切り替えたモード (A / あ) をカーソル位置に出す (Mozc と同じ入力パネルの枠)。
     static void showMode(fcitx::InputContext *ic, bool direct) {
         ic->inputPanel().setAuxUp(fcitx::Text(direct ? "A" : "あ"));
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    }
+
+    /// 切替で出した A / あ は、次のキーで 1 回だけ消す (残すと入力パネルに居座る)。
+    static void clearMode(fcitx::InputContext *ic) {
+        ic->inputPanel().setAuxUp(fcitx::Text());
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 
