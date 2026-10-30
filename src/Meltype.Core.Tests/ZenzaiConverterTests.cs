@@ -15,7 +15,7 @@ internal static class ZenzaiConverterTests
     /// <summary>受け取った prompt を記録して、answer(prompt) を content にして返す。status が 200 以外ならそのエラーを返す。</summary>
     private sealed class FakeServer : IDisposable
     {
-        private readonly HttpListener _listener = new();
+        private readonly HttpListener _listener;
         public List<string> Prompts { get; } = [];
         public int Status { get; set; } = 200;
         public Func<string, string> Answer { get; set; } = _ => "";
@@ -29,15 +29,25 @@ internal static class ZenzaiConverterTests
 
         public FakeServer()
         {
-            var port = 0;
             for (var tries = 0; tries < 20; tries++)
             {
-                port = Random.Shared.Next(20000, 60000);
-                try { _listener.Prefixes.Add($"http://127.0.0.1:{port}/"); _listener.Start(); break; }
-                catch (HttpListenerException) { _listener.Prefixes.Clear(); }
+                // ephemeral port (Linux は 32768〜、Windows・macOS は 49152〜) と重ならない範囲から選ぶ (外向きの接続が使っているポートを引かないように)
+                var port = Random.Shared.Next(20000, 32768);
+                // Start に失敗した (ポートが使われていた) HttpListener は、Linux などでは閉じられて使えなくなる。
+                // 同じものに次のポートを足すと ObjectDisposedException になってテストごと落ちていた (#1178) ので、試すたびに作り直す
+                _listener = new HttpListener();
+                try
+                {
+                    _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+                    _listener.Start();
+                    Endpoint = new Uri($"http://127.0.0.1:{port}/");
+                    Task.Run(Loop);
+                    return;
+                }
+                catch (HttpListenerException) { _listener.Close(); }
             }
-            Endpoint = new Uri($"http://127.0.0.1:{port}/");
-            Task.Run(Loop);
+            // どのポートでも始められなければ、ここで分かるように落とす (始めていないサーバーに頼んで、別の理由で落ちたように見えないように)
+            throw new InvalidOperationException("テスト用の llama-server をどのポートでも始められませんでした");
         }
 
         private void Loop()

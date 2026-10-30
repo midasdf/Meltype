@@ -245,16 +245,24 @@ final class MeltypeInputController: IMKInputController, ModeServiceTarget {
 
     @objc private func importUserDictionary(_ sender: Any?) {
         commitComposition(client())
-        // 入力メソッドは背景のアプリなので、前面に出さないと、開いた画面がほかのウィンドウに触れた瞬間に消える (issue #716)
-        NSApp.activate(ignoringOtherApps: true)
+        // 入力メニューの処理を抜けてから、操作できる画面として表示する。
+        DispatchQueue.main.async {
+            do {
+                try ImportDialogPresentation.run {
+                    Self.importUserDictionaryFile()
+                }
+            } catch {
+                NSLog("Meltype: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private static func importUserDictionaryFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.level = .floating
-        panel.makeKeyAndOrderFront(nil)
         guard panel.runModal() == .OK, let source = panel.url,
               let directory = NativeCore.shared.dataDirectory else { return }
-        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         do {
             let count = try MacUserDictionary.importFile(source, directory: directory)
