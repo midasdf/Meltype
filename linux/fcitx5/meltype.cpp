@@ -389,11 +389,6 @@ public:
         if (!loaded_) return;
         auto *ic = event.inputContext();
         auto *state = ic->propertyFor(&factory_);
-        // 直前の切替で出した A / あ は、次のキーで消す (#1034)。
-        if (state->modeShown) {
-            clearMode(ic);
-            state->modeShown = false;
-        }
         // Shift そのものの押し下げと離しを覚えておく (Space には Shift が付いてこないことがある: #1033)
         const auto shiftSym = event.key().sym();
         if (shiftSym == FcitxKey_Shift_L || shiftSym == FcitxKey_Shift_R) {
@@ -401,6 +396,12 @@ public:
             return;
         }
         if (event.isRelease()) return;
+        // 切替で出した A / あ は、次に実際のキーを押したときに消す (#1034)。
+        // 押し下げを扱うここに置く: 切替の直後の「離し」で消すと、押している間しか見えない。
+        if (state->modeShown) {
+            clearMode(ic);
+            state->modeShown = false;
+        }
         if (!state->session()) return;
         syncCanDelete(ic, state);
         const auto key = event.key();
